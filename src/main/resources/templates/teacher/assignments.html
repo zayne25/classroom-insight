@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>作业管理 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='assignments')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">作业管理</h1>
+        <p class="page-sub">发布作业、AI 辅助批改、教师复核与结果导出</p>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">选择课程</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <a th:each="c : ${courses}"
+               th:href="@{/teacher/assignments(course_id=${c.course_id})}"
+               th:classappend="${c.course_id == currentCid} ? 'btnx' : 'btnx ghost'"
+               th:text="${c.course_name}">课程</a>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">发布作业</div>
+        <div class="formx">
+            <div class="field">
+                <label>作业标题</label>
+                <input class="inputx" id="fTitle" placeholder="如：第9次作业" style="min-width:200px">
+            </div>
+            <div class="field">
+                <label>作业类型</label>
+                <select class="inputx" id="fType">
+                    <option value="客观题">客观题</option>
+                    <option value="主观题">主观题</option>
+                    <option value="编程题">编程题</option>
+                    <option value="作文">作文</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>说明</label>
+                <input class="inputx" id="fDesc" placeholder="选填" style="min-width:200px">
+            </div>
+            <div class="field">
+                <label>截止日期</label>
+                <input class="inputx" id="fDeadline" type="date">
+            </div>
+            <button class="btnx" onclick="create()">发布</button>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">作业列表</div>
+        <div class="cardx-sub">
+            「AI 批改」按作业类型调用对应引擎；「批改结果」查看逐项反馈并复核；「导出」下载 CSV
+        </div>
+        <div id="assignBox"></div>
+    </div>
+
+    <div class="cardx" id="aiCard" style="display:none">
+        <div class="cardx-title">AI 批改结果</div>
+        <div class="cardx-sub" id="aiSub"></div>
+        <div id="aiStat" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div style="margin-bottom:14px;display:flex;gap:10px">
+            <button class="btnx" onclick="runAi()">重新批改</button>
+            <button class="btnx ghost" onclick="exportCsv()">导出 CSV</button>
+        </div>
+        <div id="aiBox"></div>
+    </div>
+
+    <div class="cardx" id="detailCard" style="display:none">
+        <div class="cardx-title">提交明细</div>
+        <div class="cardx-sub" id="detailSub"></div>
+        <div id="subBox"></div>
+    </div>
+
+    <div class="modalx" id="modal" onclick="if(event.target===this)closeModal()">
+        <div class="modalx-body">
+            <div class="modalx-head">
+                <span id="mTitle" style="font-weight:700;font-size:16px"></span>
+                <button class="btnx ghost sm" onclick="closeModal()">关闭</button>
+            </div>
+            <div id="mBody" style="margin-top:12px"></div>
+        </div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CID = [[${currentCid}]];
+    let curAssign = 0;
+
+    async function create() {
+        const title = document.getElementById('fTitle').value.trim();
+        if (!title) { toast('请填写作业标题', 'err'); return; }
+        const d = await apiPost('/api/assignments', {
+            course_id: CID, title: title, type: document.getElementById('fType').value,
+            description: document.getElementById('fDesc').value.trim(),
+            deadline: document.getElementById('fDeadline').value
+        });
+        if (d) { toast('作业发布成功'); document.getElementById('fTitle').value = ''; location.reload(); }
+    }
+
+    async function loadList() {
+        const rows = await apiGet('/api/assignments?course_id=' + CID);
+        if (!rows) return;
+        renderTable(document.getElementById('assignBox'), [
+            { title: '序号', fmt: (r, i) => i + 1 },
+            { title: '作业标题', key: 'title' },
+            { title: '类型', fmt: r => '<span class="tag tag-blue">' + r.assign_type + '</span>' },
+            { title: '发布日期', key: 'assigned_at' },
+            { title: '提交数', key: 'sub_cnt' },
+            { title: '平均分', fmt: r => r.avg_score === null ? '<span class="tag tag-gray">未批改</span>' : r.avg_score },
+            {
+                title: '操作', fmt: function (r) {
+                    return '<button class="btnx sm" onclick="runAi(' + r.assign_id + ')">AI 批改</button> ' +
+                        '<button class="btnx ghost sm" onclick="showAi(' + r.assign_id + ',\'' + r.title + '\')">批改结果</button> ' +
+                        '<button class="btnx ghost sm" onclick="showDetail(' + r.assign_id + ',\'' + r.title + '\')">提交明细</button>';
+                }
+            }
+        ], rows, '暂无作业');
+    }
+
+    /* ---------------- AI 批改 ---------------- */
+
+    async function runAi(aid) {
+        if (!aid) aid = curAssign;
+        if (!aid) { toast('请先选择作业', 'err'); return; }
+        curAssign = aid;
+        const d = await apiPost('/api/ai/grading/assignments/' + aid);
+        if (!d) return;
+        toast('批改完成：' + d.graded + ' 份，耗时 ' + d.total_cost_ms + ' ms');
+        showAi(aid, '');
+    }
+
+    async function showAi(aid, title) {
+        curAssign = aid;
+        document.getElementById('aiCard').style.display = '';
+        document.getElementById('aiSub').textContent = title || ('作业 #' + aid);
+
+        const [rows, stat] = await Promise.all([
+            apiGet('/api/ai/grading/assignments/' + aid),
+            apiGet('/api/ai/grading/assignments/' + aid + '/stat')
+        ]);
+        if (!rows) { document.getElementById('aiBox').innerHTML = '<div class="empty"><span class="empty-ico">🤖</span>尚未批改，点击「AI 批改」开始</div>'; return; }
+
+        if (stat) {
+            document.getElementById('aiStat').innerHTML = [
+                ['批改引擎', stat.engine || '-'],
+                ['已批改', stat.graded_cnt + '/' + stat.sub_cnt],
+                ['AI 平均分', stat.ai_avg_score],
+                ['平均置信度', stat.avg_confidence],
+                ['平均耗时', (stat.avg_cost_ms || 0) + ' ms'],
+                ['待复核', stat.pending_cnt],
+                ['已调整', stat.adjusted_cnt],
+                ['AI与最终分平均偏差', stat.avg_deviation === null ? '暂无复核' : stat.avg_deviation]
+            ].map(function (x) {
+                return '<div><div class="stat-num" style="font-size:17px">' + x[1] + '</div><div class="stat-label">' + x[0] + '</div></div>';
+            }).join('');
+        }
+
+        renderTable(document.getElementById('aiBox'), [
+            { title: '学号', key: 'username' },
+            { title: '姓名', key: 'real_name' },
+            {
+                title: 'AI 初评', fmt: function (r) {
+                    const low = parseFloat(r.confidence) < 0.75;
+                    return '<b>' + r.ai_score + '</b> / ' + r.max_score +
+                        (low ? ' <span class="tag tag-orange">需复核</span>' : ' <span class="tag tag-green">可参考</span>');
+                }
+            },
+            { title: '置信度', key: 'confidence' },
+            { title: '状态', fmt: r => '<span class="tag ' + (r.review_status === '已确认' ? 'tag-green' : (r.review_status === '已调整' ? 'tag-orange' : 'tag-gray')) + '">' + r.review_status + '</span>' },
+            { title: '最终分', fmt: r => r.final_score === null ? '-' : '<b>' + r.final_score + '</b>' },
+            { title: '耗时', fmt: r => r.cost_ms + ' ms' },
+            {
+                title: '操作', fmt: function (r) {
+                    return '<button class="btnx ghost sm" onclick="showItems(' + r.result_id + ',\'' + r.real_name + '\')">逐项反馈</button>';
+                }
+            }
+        ], rows, '暂无批改结果');
+    }
+
+    function exportCsv() {
+        if (!curAssign) { toast('请先选择作业', 'err'); return; }
+        location.href = '/api/ai/grading/assignments/' + curAssign + '/export';
+    }
+
+    /* ---------------- 逐项反馈与复核 ---------------- */
+
+    let curResult = null;
+
+    async function showItems(resultId, name) {
+        const rows = await apiGet('/api/ai/grading/assignments/' + curAssign);
+        if (!rows) return;
+        curResult = rows.find(r => r.result_id === resultId);
+        if (!curResult) return;
+
+        let items = [];
+        try { items = JSON.parse(curResult.detail_json).items || []; } catch (e) { items = []; }
+
+        document.getElementById('modal').style.display = 'flex';
+        document.getElementById('mTitle').textContent =
+            name + ' · AI 初评 ' + curResult.ai_score + ' 分（置信度 ' + curResult.confidence + '）';
+
+        let html = '<div style="background:var(--primary-light);border-radius:8px;padding:10px 14px;margin-bottom:14px">'
+            + '<b>AI 评语：</b>' + (curResult.comment || '-')
+            + '<br><span style="color:var(--text-sub);font-size:12px">引擎：'
+            + curResult.engine + ' / ' + curResult.model + '，耗时 ' + curResult.cost_ms + ' ms</span></div>';
+
+        if (items.length) {
+            html += '<table class="tablex"><thead><tr><th>得分点</th><th>得分</th><th>命中</th>'
+                + '<th>错误定位</th><th>修改建议</th></tr></thead><tbody>';
+            items.forEach(function (it) {
+                html += '<tr><td>' + it.name + '</td><td>' + it.got + ' / ' + it.max + '</td>'
+                    + '<td>' + (it.hit ? '<span class="tag tag-green">是</span>' : '<span class="tag tag-red">否</span>') + '</td>'
+                    + '<td style="color:var(--danger)">' + (it.error || '') + '</td>'
+                    + '<td style="color:var(--text-sub)">' + (it.tip || '') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        html += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
+            + '<b>教师复核</b><div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">'
+            + '<span>最终分：<input class="inputx" id="rvScore" style="min-width:90px;padding:6px 10px" value="'
+            + (curResult.final_score === null ? curResult.ai_score : curResult.final_score) + '"></span>'
+            + '<input class="inputx" id="rvComment" placeholder="复核评语（选填）" style="min-width:260px;padding:6px 10px" value="'
+            + (curResult.teacher_comment || '') + '">'
+            + '<button class="btnx sm" onclick="submitReview()">保存复核</button>'
+            + '<span style="color:var(--text-sub);font-size:12px">复核后的分数将覆盖该学生的正式作业成绩</span>'
+            + '</div></div>';
+
+        document.getElementById('mBody').innerHTML = html;
+    }
+
+    async function submitReview() {
+        const v = document.getElementById('rvScore').value.trim();
+        if (v === '') { toast('请输入复核分数', 'err'); return; }
+        const sc = parseFloat(v);
+        if (isNaN(sc) || sc < 0 || sc > 100) { toast('分数需在 0~100 之间', 'err'); return; }
+        const d = await apiPut('/api/ai/grading/' + curResult.result_id + '/review', {
+            score: sc, comment: document.getElementById('rvComment').value.trim()
+        });
+        if (d) {
+            toast('复核完成');
+            closeModal();
+            showAi(curAssign, '');
+        }
+    }
+
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+    /* ---------------- 提交明细（原有） ---------------- */
+
+    async function showDetail(aid, title) {
+        document.getElementById('detailCard').style.display = '';
+        document.getElementById('detailSub').textContent = title;
+        const rows = await apiGet('/api/assignments/' + aid + '/submissions');
+        if (!rows) return;
+        renderTable(document.getElementById('subBox'), [
+            { title: '学号', key: 'username' },
+            { title: '姓名', key: 'real_name' },
+            { title: '提交时间', key: 'submitted_at' },
+            { title: '成绩', fmt: r => r.score === null ? '<span class="tag tag-gray">未批改</span>' : r.score },
+            {
+                title: '批改', fmt: function (r) {
+                    return '<input class="inputx" style="min-width:80px;padding:4px 8px" id="s' + r.sub_id + '" value="' + (r.score === null ? '' : r.score) + '">' +
+                        ' <button class="btnx sm" onclick="grade(' + r.sub_id + ')">保存</button>';
+                }
+            }
+        ], rows, '暂无提交记录');
+    }
+
+    async function grade(subId) {
+        const v = document.getElementById('s' + subId).value.trim();
+        if (v === '') { toast('请输入分数', 'err'); return; }
+        const d = await apiPut('/api/submissions/' + subId + '/score', { score: parseFloat(v) });
+        if (d) toast('批改成功');
+    }
+
+    loadList();
+</script>
+</body>
+</html>

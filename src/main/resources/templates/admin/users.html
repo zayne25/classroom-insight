@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>用户与角色管理 | 智课堂管理后台</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='users')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">用户与角色管理</h1>
+        <p class="page-sub">账号的增删改查、角色分配、启停与解锁；所有变更均写入审计日志</p>
+    </div>
+
+    <div class="cardx">
+        <div class="formx">
+            <div class="field">
+                <label>角色</label>
+                <select class="inputx" id="fRole">
+                    <option value="">全部</option>
+                    <option value="admin">管理员</option>
+                    <option value="teacher">教师</option>
+                    <option value="student">学生</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>状态</label>
+                <select class="inputx" id="fStatus">
+                    <option value="">全部</option>
+                    <option value="正常">正常</option>
+                    <option value="停用">停用</option>
+                </select>
+            </div>
+            <div class="field" style="flex:1;min-width:180px">
+                <label>关键词（账号 / 姓名）</label>
+                <input class="inputx" id="fKw" placeholder="如 t001 / 张建国">
+            </div>
+            <button class="btnx" onclick="load(1)">查询</button>
+            <button class="btnx ghost" onclick="resetFilter()">重置</button>
+            <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btnx" onclick="openCreate()">+ 新增用户</button>
+                <button class="btnx ghost" onclick="exportCsv()">导出 CSV</button>
+            </span>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">账号列表</div>
+        <div class="cardx-sub">
+            不能停用、删除或降级自己；系统必须保留至少一个启用状态的管理员；
+            已产生业务数据的账号只能停用，不能删除
+        </div>
+        <div id="userBox"></div>
+        <div class="pager" id="pager"></div>
+    </div>
+</main>
+
+<!-- 通用弹窗 -->
+<div class="modalx" id="modal" onclick="if(event.target===this)closeModal()">
+    <div class="modalx-body" style="width:560px">
+        <div class="modalx-head">
+            <span id="mTitle" style="font-weight:700;font-size:16px"></span>
+            <button class="btnx ghost sm" onclick="closeModal()">关闭</button>
+        </div>
+        <div id="mBody" style="padding:14px 0"></div>
+        <div id="mFoot" style="display:flex;gap:10px;justify-content:flex-end"></div>
+    </div>
+</div>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CLASSES = [[${classes}]] || [];
+    const MY_ID = [[${currentUser != null ? currentUser.userId : -1}]];
+    const ROLE_CN = { admin: '管理员', teacher: '教师', student: '学生' };
+    let page = 1, size = 10;
+
+    function qs() {
+        return 'role=' + encodeURIComponent(document.getElementById('fRole').value)
+            + '&status=' + encodeURIComponent(document.getElementById('fStatus').value)
+            + '&kw=' + encodeURIComponent(document.getElementById('fKw').value.trim());
+    }
+
+    function resetFilter() {
+        ['fRole', 'fStatus', 'fKw'].forEach(id => document.getElementById(id).value = '');
+        load(1);
+    }
+
+    async function load(p) {
+        page = p || 1;
+        const d = await apiGet('/api/admin/users?' + qs() + '&page=' + page + '&size=' + size);
+        if (!d) return;
+        render(d);
+    }
+
+    function render(d) {
+        renderTable(document.getElementById('userBox'), [
+            { title: '账号', fmt: r => '<b>' + r.username + '</b>' },
+            { title: '姓名', key: 'real_name' },
+            { title: '角色', fmt: r => '<span class="tag ' + (r.role === 'admin' ? 'tag-red' : r.role === 'teacher' ? 'tag-blue' : 'tag-gray') + '">' + ROLE_CN[r.role] + '</span>' },
+            { title: '班级', fmt: r => r.class_name || '-' },
+            { title: '状态', fmt: r => statusTag(r) },
+            { title: '最近登录', fmt: r => (r.last_login_at || '-') + (r.last_login_ip ? '<br><span class="muted">' + r.last_login_ip + '</span>' : '') },
+            { title: '操作', fmt: r => ops(r) }
+        ], d.rows, '没有符合条件的账号');
+
+        const p = document.getElementById('pager');
+        if (!d.total) { p.innerHTML = ''; return; }
+        p.innerHTML = '<span class="muted">共 ' + d.total + ' 条 / ' + d.pages + ' 页</span>'
+            + '<button class="btnx ghost sm" ' + (d.page <= 1 ? 'disabled' : '') + ' onclick="load(' + (d.page - 1) + ')">上一页</button>'
+            + '<button class="btnx ghost sm" ' + (d.page >= d.pages ? 'disabled' : '') + ' onclick="load(' + (d.page + 1) + ')">下一页</button>';
+    }
+
+    function statusTag(r) {
+        if (r.locked_until) return '<span class="tag tag-orange">已锁定</span>';
+        return r.status === '正常' ? '<span class="tag tag-green">正常</span>' : '<span class="tag tag-red">停用</span>';
+    }
+
+    function ops(r) {
+        const self = r.user_id === MY_ID;
+        let h = '<div class="op-group">';
+        h += '<button class="btnx ghost sm" onclick=\'openEdit(' + JSON.stringify(r).replace(/'/g, "\\'") + ')\'>编辑</button>';
+        h += '<button class="btnx ghost sm" onclick=\'openRole(' + r.user_id + ',"' + r.role + '",' + self + ')\'>角色</button>';
+        h += '<button class="btnx ghost sm" onclick="openPwd(' + r.user_id + ')">重置密码</button>';
+        if (r.locked_until) h += '<button class="btnx ghost sm" onclick="doUnlock(' + r.user_id + ')">解锁</button>';
+        if (!self) {
+            h += r.status === '正常'
+                ? '<button class="btnx ghost sm" onclick="doStatus(' + r.user_id + ',\'停用\')">停用</button>'
+                : '<button class="btnx ghost sm" onclick="doStatus(' + r.user_id + ',\'正常\')">启用</button>';
+            h += '<button class="btnx sm danger" onclick="openDelete(' + r.user_id + ',\'' + r.username + '\')">删除</button>';
+        }
+        return h + '</div>';
+    }
+
+    /* ---------------- 新增 / 编辑 ---------------- */
+    function classOptions(sel) {
+        return CLASSES.map(c => '<option value="' + c.class_id + '"' + (sel == c.class_id ? ' selected' : '') + '>' + c.class_name + '</option>').join('');
+    }
+
+    function openCreate() {
+        show('新增用户', `
+            <div class="form-grid">
+                <label>登录账号<i>*</i><input class="inputx" id="u_username" placeholder="3~32 位字母/数字/下划线"></label>
+                <label>姓名<i>*</i><input class="inputx" id="u_real_name"></label>
+                <label>角色<i>*</i><select class="inputx" id="u_role">
+                    <option value="student">学生</option><option value="teacher">教师</option><option value="admin">管理员</option></select></label>
+                <label>初始密码<i>*</i><input class="inputx" id="u_password" type="password" placeholder="须满足系统密码策略"></label>
+                <label>性别<select class="inputx" id="u_gender"><option value="">未填</option><option>男</option><option>女</option></select></label>
+                <label>联系电话<input class="inputx" id="u_phone"></label>
+                <label>所属班级<select class="inputx" id="u_class_id"><option value="">无（教师/管理员）</option>` + classOptions(0) + `</select></label>
+            </div>
+            <p class="hint">初始密码由管理员设置，建议通知用户首次登录后修改；密码以 BCrypt 哈希存储，系统不保存明文。</p>`,
+            '<button class="btnx ghost" onclick="closeModal()">取消</button><button class="btnx" onclick="submitCreate()">保存</button>');
+    }
+
+    async function submitCreate() {
+        const body = {
+            username: val('u_username'), real_name: val('u_real_name'), role: val('u_role'),
+            password: val('u_password'), gender: val('u_gender'), phone: val('u_phone'), class_id: val('u_class_id')
+        };
+        if (!body.username || !body.real_name || !body.password) return toast('账号、姓名、初始密码为必填项', 'err');
+        const r = await apiPost('/api/admin/users', body);
+        if (!r) return;
+        toast('新增成功');
+        closeModal();
+        load(page);
+    }
+
+    function openEdit(r) {
+        show('编辑用户 · ' + r.username, `
+            <div class="form-grid">
+                <label>登录账号<input class="inputx" value="${r.username}" disabled></label>
+                <label>姓名<i>*</i><input class="inputx" id="e_real_name" value="${r.real_name}"></label>
+                <label>角色<select class="inputx" id="e_role">
+                    <option value="student"${r.role === 'student' ? ' selected' : ''}>学生</option>
+                    <option value="teacher"${r.role === 'teacher' ? ' selected' : ''}>教师</option>
+                    <option value="admin"${r.role === 'admin' ? ' selected' : ''}>管理员</option></select></label>
+                <label>性别<select class="inputx" id="e_gender">
+                    <option value="">未填</option>
+                    <option${r.gender === '男' ? ' selected' : ''}>男</option>
+                    <option${r.gender === '女' ? ' selected' : ''}>女</option></select></label>
+                <label>联系电话<input class="inputx" id="e_phone" value="${r.phone || ''}"></label>
+                <label>所属班级<select class="inputx" id="e_class_id"><option value="">无</option>` + classOptions(r.class_id) + `</select></label>
+            </div>
+            <p class="hint">登录账号创建后不可修改；若修改自己账号的角色会被服务端拒绝。</p>`,
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + '<button class="btnx" onclick="submitEdit(' + r.user_id + ')">保存</button>');
+    }
+
+    async function submitEdit(id) {
+        const body = {
+            real_name: val('e_real_name'), role: val('e_role'), gender: val('e_gender'),
+            phone: val('e_phone'), class_id: val('e_class_id')
+        };
+        const r = await fetch('/api/admin/users/' + id, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const j = await r.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('保存成功');
+        closeModal();
+        load(page);
+    }
+
+    /* ---------------- 角色分配 ---------------- */
+    function openRole(id, role, self) {
+        if (self) return toast('不能修改自己的角色', 'err');
+        show('分配角色', `
+            <div class="field"><label>目标角色</label>
+            <select class="inputx" id="r_role">
+                <option value="student"${role === 'student' ? ' selected' : ''}>学生（仅查看本人数据）</option>
+                <option value="teacher"${role === 'teacher' ? ' selected' : ''}>教师（教学业务 + 系统监控）</option>
+                <option value="admin"${role === 'admin' ? ' selected' : ''}>管理员（全部权限）</option>
+            </select></div>
+            <p class="hint">角色决定可见菜单与可执行操作；权限细节可在「权限与访问控制」中按角色配置。</p>`,
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + '<button class="btnx" onclick="submitRole(' + id + ')">保存</button>');
+    }
+
+    async function submitRole(id) {
+        const r = await fetch('/api/admin/users/' + id + '/role', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: val('r_role') })
+        });
+        const j = await r.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('角色已更新');
+        closeModal();
+        load(page);
+    }
+
+    /* ---------------- 密码 / 状态 / 解锁 / 删除 ---------------- */
+    function openPwd(id) {
+        show('重置密码', `
+            <div class="field"><label>新密码</label>
+            <input class="inputx" id="p_pwd" type="password" placeholder="须满足系统配置的密码策略"></div>
+            <p class="hint">重置后会同时解除该账号的登录锁定；密码以 BCrypt 哈希存储。</p>`,
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + '<button class="btnx" onclick="submitPwd(' + id + ')">确认重置</button>');
+    }
+
+    async function submitPwd(id) {
+        const pwd = val('p_pwd');
+        if (!pwd) return toast('请输入新密码', 'err');
+        const r = await fetch('/api/admin/users/' + id + '/password', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd })
+        });
+        const j = await r.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('密码已重置');
+        closeModal();
+    }
+
+    async function doStatus(id, status) {
+        if (status === '停用' && !confirm('确认停用该账号？停用后该用户将无法登录。')) return;
+        const r = await fetch('/api/admin/users/' + id + '/status', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+        });
+        const j = await r.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast(status === '停用' ? '已停用' : '已启用');
+        load(page);
+    }
+
+    async function doUnlock(id) {
+        const res = await fetch('/api/admin/users/' + id + '/unlock', { method: 'POST' });
+        const j = await res.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('已解除锁定');
+        load(page);
+    }
+
+    async function openDelete(id, username) {
+        const d = await apiGet('/api/admin/users/' + id);
+        if (!d) return;
+        const refs = d.refs || {};
+        const total = Object.values(refs).reduce((a, b) => a + (Number(b) || 0), 0);
+        const blocked = total > 0;
+        show('删除账号 · ' + username, `
+            <div class="del-warn">
+                <div><b>关联业务数据</b>：课程 ${refs.course_cnt || 0} · 选课 ${refs.enroll_cnt || 0}
+                    · 作业 ${refs.sub_cnt || 0} · 考勤 ${refs.att_cnt || 0}
+                    · 互动 ${refs.inter_cnt || 0} · 行为 ${refs.event_cnt || 0}</div>
+                <div style="margin-top:8px">
+                    ${blocked
+                        ? '<span class="tag tag-red">不可删除</span> 该账号已产生业务数据，删除会破坏数据完整性，请改用「停用」。'
+                        : '<span class="tag tag-green">可安全删除</span> 该账号暂无业务数据。'}
+                </div>
+            </div>
+            <div class="field" style="margin-top:14px"><label>请输入账号 <b>${username}</b> 以确认</label>
+                <input class="inputx" id="d_confirm" placeholder="${username}"></div>`,
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + (blocked ? '' : '<button class="btnx danger" onclick="submitDelete(' + id + ',\'' + username + '\')">确认删除</button>'));
+    }
+
+    async function submitDelete(id, username) {
+        if (val('d_confirm') !== username) return toast('确认信息不一致', 'err');
+        const r = await fetch('/api/admin/users/' + id, { method: 'DELETE' });
+        const j = await r.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('已删除');
+        closeModal();
+        load(page);
+    }
+
+    function exportCsv() { location.href = '/api/admin/users/export?' + qs(); }
+
+    /* ---------------- 弹窗工具 ---------------- */
+    function show(title, body, foot) {
+        document.getElementById('mTitle').textContent = title;
+        document.getElementById('mBody').innerHTML = body;
+        document.getElementById('mFoot').innerHTML = foot;
+        document.getElementById('modal').style.display = 'flex';
+    }
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+    function val(id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; }
+
+    load(1);
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>学业预警 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='students')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">学业预警</h1>
+        <p class="page-sub">按综合学情分升序排列，红色为高危学生，并给出归因标签</p>
+    </div>
+
+    <div class="cardx">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <a th:each="c : ${courses}"
+               th:href="@{/teacher/students(course_id=${c.course_id})}"
+               th:classappend="${c.course_id == currentCid} ? 'btnx' : 'btnx ghost'"
+               th:text="${c.course_name}">课程</a>
+            <span style="margin-left:auto;display:flex;gap:8px">
+                <button class="btnx ghost sm" onclick="filterBy('全部')">全部</button>
+                <button class="btnx sm danger" onclick="filterBy('红')">红色</button>
+                <button class="btnx ghost sm" onclick="filterBy('黄')">黄色</button>
+                <button class="btnx ghost sm" onclick="filterBy('绿')">绿色</button>
+            </span>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">学生学情明细</div>
+        <div class="cardx-sub">
+            综合学情分 = 0.3×出勤分 + 0.3×互动分 + 0.4×作业均分；
+            分级规则：综合分&lt;60 或 出勤率&lt;70% → 红；综合分&lt;75 或 出勤率&lt;85% → 黄；其余 → 绿
+        </div>
+        <div id="stuBox"></div>
+    </div>
+
+    <div class="modalx" id="modal" onclick="if(event.target===this)closeModal()">
+        <div class="modalx-body">
+            <div class="modalx-head">
+                <span id="mTitle" style="font-weight:700;font-size:16px"></span>
+                <button class="btnx ghost sm" onclick="closeModal()">关闭</button>
+            </div>
+            <div id="mStat" style="display:flex;gap:22px;flex-wrap:wrap;margin:12px 0"></div>
+            <div id="mRadar" class="chart" style="height:300px"></div>
+        </div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CID = [[${currentCid}]];
+    let allRows = [];
+
+    async function load() {
+        const rows = await apiGet('/api/analytics/course/' + CID + '/risk');
+        if (!rows) return;
+        allRows = rows;
+        filterBy('全部');
+    }
+
+    function filterBy(level) {
+        const rows = level === '全部' ? allRows : allRows.filter(r => r.risk_level === level);
+        renderTable(document.getElementById('stuBox'), [
+            { title: '学号', key: 'username' },
+            { title: '姓名', key: 'real_name' },
+            { title: '班级', key: 'class_name' },
+            { title: '出勤率', fmt: r => r.attendance_rate + '%' },
+            { title: '互动次数', key: 'interact_cnt' },
+            { title: '互动正确率', fmt: r => r.inter_correct_rate + '%' },
+            { title: '作业均分', fmt: r => r.avg_score },
+            { title: '综合学情分', fmt: r => '<b>' + r.composite_score + '</b>' },
+            { title: '等级', fmt: r => riskTag(r.risk_level) },
+            { title: '归因', fmt: r => r.reasons.map(x => '<span class="tag tag-gray">' + x + '</span>').join(' ') },
+            { title: '操作', fmt: r => '<button class="btnx ghost sm" onclick="detail(' + r.student_id + ',\'' + r.real_name + '\')">查看学情</button>' }
+        ], rows, '暂无数据');
+    }
+
+    async function detail(sid, name) {
+        const d = await apiGet('/api/analytics/student?course_id=' + CID + '&student_id=' + sid);
+        if (!d) return;
+        document.getElementById('modal').style.display = 'flex';
+        document.getElementById('mTitle').textContent = name + ' 的个人学情（排名 ' + d.kpi.rank + '/' + d.kpi.total + '）';
+        document.getElementById('mStat').innerHTML = [
+            ['出勤率', d.kpi.attendance_rate + '%'],
+            ['互动参与率', d.kpi.part_rate + '%'],
+            ['互动正确率', d.kpi.inter_correct_rate + '%'],
+            ['作业均分', d.kpi.avg_score],
+            ['综合学情分', d.kpi.composite_score],
+            ['风险等级', d.kpi.risk_level]
+        ].map(x => '<div><div class="stat-num" style="font-size:19px">' + x[1] + '</div><div class="stat-label">' + x[0] + '</div></div>').join('');
+
+        mkChart(document.getElementById('mRadar'), {
+            tooltip: {}, legend: { bottom: 0 },
+            radar: { indicator: d.kp_compare.map(k => ({ name: k.kp_name, max: 100 })), radius: '64%' },
+            series: [{
+                type: 'radar', data: [
+                    { value: d.kp_compare.map(k => k.mine), name: '本人掌握度(%)', areaStyle: { opacity: .25 } },
+                    { value: d.kp_compare.map(k => k.cls), name: '班级平均(%)', areaStyle: { opacity: .12 } }
+                ]
+            }]
+        });
+    }
+
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+    load();
+</script>
+</body>
+</html>

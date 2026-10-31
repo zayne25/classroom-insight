@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>课堂互动 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='interactions')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">课堂互动</h1>
+        <p class="page-sub">发布抢答、随机点名、投票与提问，实时查看学生参与情况</p>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">选择课程</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <a th:each="c : ${courses}"
+               th:href="@{/teacher/interactions(course_id=${c.course_id})}"
+               th:classappend="${c.course_id == currentCid} ? 'btnx' : 'btnx ghost'"
+               th:text="${c.course_name}">课程</a>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">发布互动</div>
+        <div class="formx">
+            <div class="field">
+                <label>所属课时</label>
+                <select class="inputx" id="fLesson">
+                    <option th:each="l : ${lessons}" th:value="${l.lesson_id}"
+                            th:text="'第' + ${l.lesson_no} + '讲 ' + ${l.title}">课时</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>互动类型</label>
+                <select class="inputx" id="fType" onchange="toggleOptions()">
+                    <option value="抢答">抢答</option>
+                    <option value="随机点名">随机点名</option>
+                    <option value="投票">投票</option>
+                    <option value="提问">提问</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>互动标题</label>
+                <input class="inputx" id="fTitle" placeholder="如：关于索引的抢答" style="min-width:220px">
+            </div>
+            <div class="field" id="optBox">
+                <label>选项（每行一个）</label>
+                <textarea class="inputx" id="fOptions" rows="3" placeholder="B+树索引&#10;哈希索引&#10;位图索引&#10;全文索引"></textarea>
+            </div>
+            <div class="field" id="ansBox">
+                <label>正确答案</label>
+                <select class="inputx" id="fAnswer">
+                    <option>A</option><option>B</option><option>C</option><option>D</option>
+                </select>
+            </div>
+            <button class="btnx" onclick="publish()">发布</button>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">互动记录</div>
+        <div class="cardx-sub">本课程最近发布的互动及其参与情况</div>
+        <div id="interBox"></div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CID = [[${currentCid}]];
+
+    function toggleOptions() {
+        const t = document.getElementById('fType').value;
+        const grade = (t === '抢答' || t === '随机点名');
+        document.getElementById('ansBox').style.display = grade ? '' : 'none';
+        document.getElementById('optBox').style.display = (t === '提问') ? 'none' : '';
+    }
+
+    async function publish() {
+        const t = document.getElementById('fType').value;
+        const title = document.getElementById('fTitle').value.trim();
+        if (!title) { toast('请填写互动标题', 'err'); return; }
+        const options = document.getElementById('fOptions').value.split('\n').map(s => s.trim()).filter(Boolean);
+        const d = await apiPost('/api/interactions', {
+            lesson_id: parseInt(document.getElementById('fLesson').value),
+            type: t, title: title, options: options,
+            correct_answer: document.getElementById('fAnswer').value
+        });
+        if (d) { toast('互动已发布'); document.getElementById('fTitle').value = ''; loadCourseInteractions(); }
+    }
+
+    async function loadCourseInteractions() {
+        const rows = [];
+        const lessons = await apiGet('/api/lessons?course_id=' + CID);
+        if (!lessons) return;
+        for (const l of lessons) {
+            const its = await apiGet('/api/lessons/' + l.lesson_id + '/interactions');
+            (its || []).forEach(i => { i.lesson_no = l.lesson_no; rows.push(i); });
+        }
+        rows.sort((a, b) => b.inter_id - a.inter_id);
+        renderTable(document.getElementById('interBox'), [
+            { title: '讲次', fmt: r => '第' + r.lesson_no + '讲' },
+            { title: '类型', fmt: r => '<span class="tag tag-blue">' + r.type + '</span>' },
+            { title: '内容', key: 'title' },
+            { title: '参与率', fmt: r => r.respond_cnt + '/' + r.total_stu + '（' + r.respond_rate + '%）' },
+            { title: '正确率', fmt: r => r.gradeable == 1 ? r.correct_rate + '%' : '<span class="tag tag-gray">不计分</span>' }
+        ], rows.slice(0, 60), '暂无互动记录');
+    }
+
+    toggleOptions();
+    loadCourseInteractions();
+</script>
+</body>
+</html>

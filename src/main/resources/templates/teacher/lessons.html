@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>课堂管理 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='lessons')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">课堂管理</h1>
+        <p class="page-sub">创建课时、开启签到、查看每节课的出勤情况</p>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">选择课程</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <a th:each="c : ${courses}"
+               th:href="@{/teacher/lessons(course_id=${c.course_id})}"
+               th:classappend="${c.course_id == currentCid} ? 'btnx' : 'btnx ghost'"
+               th:text="${c.course_name}">课程</a>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">新建课时</div>
+        <div class="formx">
+            <div class="field">
+                <label>课时标题</label>
+                <input class="inputx" id="fTitle" placeholder="如：第17讲 数据库新技术" style="min-width:260px">
+            </div>
+            <div class="field">
+                <label>上课日期</label>
+                <input class="inputx" id="fDate" type="date" value="2026-12-21">
+            </div>
+            <div class="field">
+                <label>开始时间</label>
+                <input class="inputx" id="fStart" type="time" value="08:00">
+            </div>
+            <div class="field">
+                <label>结束时间</label>
+                <input class="inputx" id="fEnd" type="time" value="09:40">
+            </div>
+            <button class="btnx" onclick="createLesson()">创建</button>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">课时列表</div>
+        <div class="cardx-sub">点击「开始课堂」生成 4 位签到码，学生凭码签到；课堂进行中可进入实时看板</div>
+        <div id="lessonBox"></div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CID = [[${currentCid}]];
+
+    async function loadLessons() {
+        const rows = await apiGet('/api/lessons?course_id=' + CID);
+        if (!rows) return;
+        renderTable(document.getElementById('lessonBox'), [
+            { title: '讲次', key: 'lesson_no' },
+            { title: '课堂主题', key: 'title' },
+            { title: '日期', key: 'lesson_date' },
+            { title: '时间', fmt: r => r.start_time + ' - ' + r.end_time },
+            {
+                title: '出勤', fmt: function (r) {
+                    return r.attended_cnt + '/' + r.total_stu +
+                        ' <span class="tag ' + (r.att_rate >= 90 ? 'tag-green' : (r.att_rate >= 75 ? 'tag-orange' : 'tag-red')) + '">' + r.att_rate + '%</span>';
+                }
+            },
+            {
+                title: '状态', fmt: function (r) {
+                    const cls = r.status === '进行中' ? 'tag-green' : (r.status === '已结束' ? 'tag-gray' : 'tag-blue');
+                    return '<span class="tag ' + cls + '">' + r.status + '</span>';
+                }
+            },
+            {
+                title: '操作', fmt: function (r) {
+                    let h = '';
+                    if (r.status !== '进行中') h += '<button class="btnx sm" onclick="startLesson(' + r.lesson_id + ')">开始课堂</button> ';
+                    if (r.status === '进行中') {
+                        h += '<a class="btnx sm" href="/teacher/live/' + r.lesson_id + '">实时看板</a> ';
+                        h += '<button class="btnx sm danger" onclick="endLesson(' + r.lesson_id + ')">结束</button>';
+                    } else {
+                        h += '<a class="btnx ghost sm" href="/teacher/live/' + r.lesson_id + '">查看详情</a>';
+                    }
+                    return h;
+                }
+            }
+        ], rows, '该课程暂无课时');
+    }
+
+    async function createLesson() {
+        const title = document.getElementById('fTitle').value.trim();
+        if (!title) { toast('请填写课时标题', 'err'); return; }
+        const d = await apiPost('/api/lessons', {
+            course_id: CID, title: title,
+            lesson_date: document.getElementById('fDate').value,
+            start_time: document.getElementById('fStart').value,
+            end_time: document.getElementById('fEnd').value
+        });
+        if (d) { toast('课时创建成功'); document.getElementById('fTitle').value = ''; loadLessons(); }
+    }
+
+    async function startLesson(id) {
+        const d = await apiPost('/api/lessons/' + id + '/start');
+        if (d) { toast('课堂已开始，签到码：' + d.checkin_code); loadLessons(); }
+    }
+
+    async function endLesson(id) {
+        const d = await apiPost('/api/lessons/' + id + '/end');
+        if (d) { toast(d.msg); loadLessons(); }
+    }
+
+    loadLessons();
+</script>
+</body>
+</html>

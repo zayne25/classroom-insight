@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>操作日志与审计 | 智课堂管理后台</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='logs')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">操作日志与审计追踪</h1>
+        <p class="page-sub">记录谁、何时、对什么对象、做了什么、结果如何；成功与失败同样留痕</p>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-ico">🧾</div>
+            <div><div class="stat-num" th:text="${summary.total} ?: 0">0</div><div class="stat-label">日志总数</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico blue">📅</div>
+            <div><div class="stat-num" th:text="${summary.today} ?: 0">0</div><div class="stat-label">今日操作</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico" th:classappend="${summary.fail > 0} ? 'red' : 'green'">⚠️</div>
+            <div><div class="stat-num" th:text="${summary.fail} ?: 0">0</div><div class="stat-label">失败操作</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico orange">🗃️</div>
+            <div><div class="stat-num" th:text="${#lists.size(summary.modules)} ?: 0">0</div>
+                <div class="stat-label">覆盖模块</div></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="formx">
+            <div class="field">
+                <label>模块</label>
+                <select class="inputx" id="fModule">
+                    <option value="">全部</option>
+                    <option th:each="m : ${modules}" th:value="${m}" th:text="${m}">模块</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>结果</label>
+                <select class="inputx" id="fResult">
+                    <option value="">全部</option>
+                    <option value="成功">成功</option>
+                    <option value="失败">失败</option>
+                </select>
+            </div>
+            <div class="field" style="flex:1;min-width:180px">
+                <label>关键词（操作人 / 操作 / 对象）</label>
+                <input class="inputx" id="fKw" placeholder="如 admin / 修改配置">
+            </div>
+            <div class="field">
+                <label>起始日期</label>
+                <input class="inputx" type="date" id="fFrom">
+            </div>
+            <div class="field">
+                <label>截止日期</label>
+                <input class="inputx" type="date" id="fTo">
+            </div>
+            <button class="btnx" onclick="load(1)">查询</button>
+            <button class="btnx ghost" onclick="quick(7)">近 7 天</button>
+            <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btnx ghost" onclick="exportCsv()">导出 CSV</button>
+                <button class="btnx danger" onclick="openPurge()">清理日志</button>
+            </span>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">审计流水</div>
+        <div class="cardx-sub">点击「详情」查看完整变更内容（改前 → 改后）、来源 IP 与客户端标识</div>
+        <div id="logBox"></div>
+        <div class="pager" id="pager"></div>
+    </div>
+</main>
+
+<div class="modalx" id="modal" onclick="if(event.target===this)closeModal()">
+    <div class="modalx-body" style="width:600px">
+        <div class="modalx-head">
+            <span id="mTitle" style="font-weight:700;font-size:16px"></span>
+            <button class="btnx ghost sm" onclick="closeModal()">关闭</button>
+        </div>
+        <div id="mBody" style="padding:14px 0"></div>
+        <div id="mFoot" style="display:flex;gap:10px;justify-content:flex-end"></div>
+    </div>
+</div>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script>
+    let page = 1, size = 20, rows = [];
+
+    function qs() {
+        return 'module=' + encodeURIComponent(document.getElementById('fModule').value)
+            + '&result=' + encodeURIComponent(document.getElementById('fResult').value)
+            + '&kw=' + encodeURIComponent(document.getElementById('fKw').value.trim())
+            + '&from=' + encodeURIComponent(document.getElementById('fFrom').value)
+            + '&to=' + encodeURIComponent(document.getElementById('fTo').value);
+    }
+
+    function quick(days) {
+        const end = new Date(), start = new Date(Date.now() - (days - 1) * 86400000);
+        const f = d => d.toISOString().slice(0, 10);
+        document.getElementById('fFrom').value = f(start);
+        document.getElementById('fTo').value = f(end);
+        load(1);
+    }
+
+    async function load(p) {
+        page = p || 1;
+        const d = await apiGet('/api/admin/logs?' + qs() + '&page=' + page + '&size=' + size);
+        if (!d) return;
+        rows = d.rows;
+        renderTable(document.getElementById('logBox'), [
+            { title: '时间', fmt: r => '<span class="muted">' + (r.created_at || '-') + '</span>' },
+            { title: '操作人', fmt: r => '<b>' + (r.operator || '系统') + '</b>' + (r.operator_name ? '<br><span class="muted">' + r.operator_name + '</span>' : '') },
+            { title: '模块', fmt: r => '<span class="tag tag-blue">' + r.module + '</span>' },
+            { title: '操作', key: 'operation' },
+            { title: '对象', fmt: r => r.target || '-' },
+            { title: '结果', fmt: r => r.result === '成功' ? '<span class="tag tag-green">成功</span>' : '<span class="tag tag-red">失败</span>' },
+            { title: '耗时', fmt: r => (r.cost_ms == null ? '-' : r.cost_ms + ' ms') },
+            { title: '操作', fmt: (r, i) => '<button class="btnx ghost sm" onclick="detail(' + i + ')">详情</button>' }
+        ], d.rows, '暂无日志');
+
+        const pg = document.getElementById('pager');
+        if (!d.total) { pg.innerHTML = ''; return; }
+        pg.innerHTML = '<span class="muted">共 ' + d.total + ' 条 / ' + d.pages + ' 页</span>'
+            + '<button class="btnx ghost sm" ' + (d.page <= 1 ? 'disabled' : '') + ' onclick="load(' + (d.page - 1) + ')">上一页</button>'
+            + '<button class="btnx ghost sm" ' + (d.page >= d.pages ? 'disabled' : '') + ' onclick="load(' + (d.page + 1) + ')">下一页</button>';
+    }
+
+    function detail(i) {
+        const r = rows[i];
+        document.getElementById('mTitle').textContent = '日志详情 #' + r.log_id;
+        document.getElementById('mBody').innerHTML = `
+            <table class="tablex">
+                <tr><th style="width:32%">操作人</th><td>${r.operator || '系统'}（${r.operator_name || '-'}，ID ${r.operator_id ?? '-'}）</td></tr>
+                <tr><th>时间</th><td>${r.created_at || '-'}</td></tr>
+                <tr><th>模块 / 操作</th><td>${r.module} · ${r.operation}</td></tr>
+                <tr><th>操作对象</th><td>${r.target || '-'}</td></tr>
+                <tr><th>结果</th><td>${r.result}${r.fail_reason ? '（' + r.fail_reason + '）' : ''}</td></tr>
+                <tr><th>变更详情</th><td style="white-space:normal">${r.detail || '-'}</td></tr>
+                <tr><th>来源 IP</th><td>${r.ip || '-'}</td></tr>
+                <tr><th>客户端</th><td style="white-space:normal">${r.user_agent || '-'}</td></tr>
+                <tr><th>耗时</th><td>${r.cost_ms == null ? '-' : r.cost_ms + ' ms'}</td></tr>
+            </table>`;
+        document.getElementById('mFoot').innerHTML = '<button class="btnx ghost" onclick="closeModal()">关闭</button>';
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    function openPurge() {
+        document.getElementById('mTitle').textContent = '清理历史日志';
+        document.getElementById('mBody').innerHTML = `
+            <div class="field"><label>保留最近天数（7~1095）</label>
+            <input class="inputx" id="p_days" type="number" value="180" min="7" max="1095" style="width:100%"></div>
+            <p class="hint">清理将<b>永久删除</b>早于该天数的日志，且不可恢复。建议先导出留档。</p>`;
+        document.getElementById('mFoot').innerHTML =
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + '<button class="btnx danger" onclick="submitPurge()">确认清理</button>';
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    async function submitPurge() {
+        const days = document.getElementById('p_days').value;
+        if (!confirm('确认删除 ' + days + ' 天前的全部日志？该操作不可撤销。')) return;
+        const res = await fetch('/api/admin/logs/purge?days=' + days, { method: 'DELETE' });
+        const j = await res.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast(j.msg);
+        closeModal();
+        load(1);
+    }
+
+    function exportCsv() { location.href = '/api/admin/logs/export?' + qs(); }
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+    load(1);
+</script>
+</body>
+</html>

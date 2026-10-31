@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>登录 | 智课堂 · 大学课堂互动与学情分析系统</title>
+    <link rel="stylesheet" th:href="@{/vendor/bootstrap.min.css}">
+    <link rel="stylesheet" th:href="@{/css/theme.css}">
+</head>
+<body class="login-body">
+
+<div class="login-wrap">
+
+    <!-- ---------------- 左侧品牌区 ---------------- -->
+    <div class="login-brand">
+        <div class="brand-logo">
+            <div class="brand-mark">智</div>
+            <div>
+                <div class="brand-title">智课堂</div>
+                <div class="brand-sub">CLASSROOM INSIGHT</div>
+            </div>
+        </div>
+
+        <div class="brand-lead">让每一次课堂互动<br>都成为可分析的数据</div>
+        <div class="brand-desc">
+            面向大学课堂教学场景，打通"签到—互动—答题—作业"全链路，
+            自动生成学情画像与学业预警。
+        </div>
+
+        <div class="brand-features">
+            <div class="brand-feature">
+                <div class="bf-ico">◎</div>
+                <div>
+                    <div class="bf-t">课堂签到</div>
+                    <div class="bf-d">一键开课生成 4 位签到码，出勤状态实时统计</div>
+                </div>
+            </div>
+            <div class="brand-feature">
+                <div class="bf-ico">✦</div>
+                <div>
+                    <div class="bf-t">实时互动</div>
+                    <div class="bf-d">抢答 / 投票 / 点名 / 提问，看板 3 秒自动刷新</div>
+                </div>
+            </div>
+            <div class="brand-feature">
+                <div class="bf-ico">◈</div>
+                <div>
+                    <div class="bf-t">学情分析</div>
+                    <div class="bf-d">10 张可视化图表，自动输出薄弱知识点与预警名单</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---------------- 右侧表单区 ---------------- -->
+    <div class="login-form">
+        <div class="lf-title">欢迎回来</div>
+        <div class="lf-desc">请使用教师账号或学号登录（演示密码统一为 123456）</div>
+
+        <form id="loginForm" autocomplete="off">
+            <div class="field-icon">
+                <span class="ico">👤</span>
+                <input class="inputx block with-icon" id="username" autofocus
+                       placeholder="用户名 / 学号" autocomplete="username">
+            </div>
+
+            <div class="field-icon">
+                <span class="ico">🔒</span>
+                <input class="inputx block with-icon" id="password" type="password"
+                       placeholder="密码" autocomplete="current-password">
+                <button class="toggle-pwd" type="button" onclick="togglePwd()">显示</button>
+            </div>
+
+            <button class="btnx lf-btn" type="submit" id="btnLogin">登 录</button>
+        </form>
+
+        <div class="lf-divider">演示账号（点击自动填入）</div>
+        <div class="login-quick">
+            <button class="quick-chip" type="button" onclick="fill('t001')">教师 t001</button>
+            <button class="quick-chip" type="button" onclick="fill('t002')">教师 t002</button>
+            <button class="quick-chip" type="button" onclick="fill('20230101')">学生 20230101</button>
+            <button class="quick-chip" type="button" onclick="fill('admin')">管理员 admin</button>
+        </div>
+
+        <div class="lf-foot">
+            学号范围 20230101 ~ 20230335（即账号，可直接登录）<br>
+            Spring Boot + MySQL + MyBatis + Thymeleaf
+        </div>
+    </div>
+</div>
+
+<script th:src="@{/js/common.js}"></script>
+<script>
+    function togglePwd() {
+        var el = document.getElementById('password');
+        var btn = document.querySelector('.toggle-pwd');
+        if (el.type === 'password') { el.type = 'text'; btn.textContent = '隐藏'; }
+        else { el.type = 'password'; btn.textContent = '显示'; }
+    }
+
+    function fill(u) {
+        document.getElementById('username').value = u;
+        document.getElementById('password').value = '123456';
+        document.getElementById('password').focus();
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value;
+        if (!username || !password) { toast('请输入用户名与密码', 'err'); return; }
+
+        var btn = document.getElementById('btnLogin');
+        btn.disabled = true;
+        btn.textContent = '登录中...';
+
+        var data = await apiPost('/api/auth/login', { username: username, password: password });
+
+        btn.disabled = false;
+        btn.textContent = '登 录';
+        if (data) {
+            toast('欢迎回来，' + data.real_name);
+            location.href = data.home;
+        }
+    });
+</script>
+</body>
+</html>

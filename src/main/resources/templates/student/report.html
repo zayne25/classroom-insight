@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>我的学情 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='report')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">我的学情</h1>
+        <p class="page-sub">对比个人与班级的学习表现，定位自身薄弱环节</p>
+    </div>
+
+    <div class="cardx">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <a th:each="c : ${courses}"
+               th:href="@{/student/report(course_id=${c.course_id})}"
+               th:classappend="${c.course_id == currentCid} ? 'btnx' : 'btnx ghost'"
+               th:text="${c.course_name}">课程</a>
+        </div>
+    </div>
+
+    <div class="stat-grid" id="statGrid"></div>
+
+    <div class="cardx">
+        <div class="cardx-title">学习建议</div>
+        <div class="cardx-sub">系统根据你的真实数据生成</div>
+        <div class="conclusion"><ol id="adviceList"></ol></div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">知识点掌握度：我 vs 班级平均</div>
+            <div class="cardx-sub">找出自己低于班级平均水平的知识点</div>
+            <div id="kpRadar" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">作业成绩趋势</div>
+            <div class="cardx-sub">个人成绩与班级平均成绩对比</div>
+            <div id="scoreTrend" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">各课时出勤记录</div>
+        <div class="cardx-sub">绿色为正常出勤，橙色为迟到，蓝色为请假，红色为缺勤</div>
+        <div id="attBox"></div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CID = [[${currentCid}]];
+
+    async function boot() {
+        const d = await apiGet('/api/analytics/student?course_id=' + CID);
+        if (!d) return;
+        const k = d.kpi;
+
+        const cards = [
+            ['✓', 'green', k.attendance_rate + '%', '出勤率'],
+            ['✦', '', k.interact_cnt, '互动参与次数'],
+            ['◎', 'blue', k.inter_correct_rate + '%', '互动正确率'],
+            ['📊', 'orange', k.avg_score, '作业平均分'],
+            ['★', '', k.composite_score, '综合学情分'],
+            ['🏅', 'blue', k.rank + '/' + k.total, '班级排名'],
+            ['⚑', k.risk_level === '红' ? 'red' : (k.risk_level === '黄' ? 'orange' : 'green'), k.risk_level, '风险等级'],
+            ['▣', '', k.sub_cnt, '作业提交次数']
+        ];
+        document.getElementById('statGrid').innerHTML = cards.map(function (x) {
+            return '<div class="stat-card"><div class="stat-ico ' + x[1] + '">' + x[0] + '</div>' +
+                '<div><div class="stat-num">' + x[2] + '</div><div class="stat-label">' + x[3] + '</div></div></div>';
+        }).join('');
+
+        mkChart(document.getElementById('kpRadar'), {
+            tooltip: {}, legend: { bottom: 0 },
+            radar: { indicator: d.kp_compare.map(x => ({ name: x.kp_name, max: 100 })), radius: '64%' },
+            series: [{
+                type: 'radar', data: [
+                    { value: d.kp_compare.map(x => x.mine), name: '我的掌握度(%)', areaStyle: { opacity: .25 } },
+                    { value: d.kp_compare.map(x => x.cls), name: '班级平均(%)', areaStyle: { opacity: .12 } }
+                ]
+            }]
+        });
+
+        mkChart(document.getElementById('scoreTrend'), {
+            tooltip: { trigger: 'axis' }, legend: { bottom: 0 },
+            grid: { left: 46, right: 20, top: 24, bottom: 42 },
+            xAxis: { type: 'category', data: d.score_trend.map(x => x.name) },
+            yAxis: { type: 'value', max: 100 },
+            series: [
+                { name: '我的成绩', type: 'line', smooth: true, data: d.score_trend.map(x => x.mine), symbolSize: 6 },
+                {
+                    name: '班级平均', type: 'line', smooth: true,
+                    data: d.score_trend.map(x => x.cls), symbolSize: 6, lineStyle: { type: 'dashed' }
+                }
+            ]
+        });
+
+        renderTable(document.getElementById('attBox'), [
+            { title: '讲次', fmt: r => '第' + r.lesson_no + '讲' },
+            { title: '主题', key: 'title' },
+            { title: '日期', key: 'lesson_date' },
+            {
+                title: '状态', fmt: function (r) {
+                    const m = { '正常': 'tag-green', '迟到': 'tag-orange', '请假': 'tag-blue' };
+                    return '<span class="tag ' + (m[r.status] || 'tag-red') + '">' + r.status + '</span>';
+                }
+            }
+        ], d.lessons, '暂无出勤记录');
+
+        // 学习建议（由真实数据生成）
+        const weak = d.kp_compare.filter(x => x.mine < 60).map(x => x.kp_name + '（' + x.mine + '%）');
+        const below = d.kp_compare.filter(x => x.mine < x.cls - 5).map(x => x.kp_name);
+        const tip = [];
+        if (k.attendance_rate < 85) {
+            tip.push('你的出勤率为 <b>' + k.attendance_rate + '%</b>，低于良好水平（85%），提高课堂出勤是改善学习效果最直接的方式。');
+        } else {
+            tip.push('你的出勤率为 <b>' + k.attendance_rate + '%</b>，出勤情况良好，请继续保持。');
+        }
+        if (k.part_rate < 60) {
+            tip.push('课堂互动参与率为 <b>' + k.part_rate + '%</b>，建议更积极地参与抢答与投票，互动参与度和成绩呈正相关。');
+        } else {
+            tip.push('课堂互动参与率为 <b>' + k.part_rate + '%</b>，互动表现积极。');
+        }
+        if (weak.length) tip.push('掌握度低于 60% 的薄弱知识点：<b>' + weak.join('、') + '</b>，建议针对性复习。');
+        if (below.length) tip.push('以下知识点低于班级平均水平 5 个百分点以上：<b>' + below.join('、') + '</b>。');
+        tip.push('综合学情分 <b>' + k.composite_score + '</b>，班级排名 <b>' + k.rank + '/' + k.total +
+            '</b>，风险等级 <b>' + k.risk_level + '</b>。');
+        document.getElementById('adviceList').innerHTML = tip.map(t => '<li>' + t + '</li>').join('');
+    }
+
+    boot();
+</script>
+</body>
+</html>

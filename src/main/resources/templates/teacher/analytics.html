@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>学情分析 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='analytics')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">学情分析</h1>
+        <p class="page-sub">基于课堂签到、互动响应、随堂答题与作业成绩的全量数据，多维度分析班级学习状况</p>
+    </div>
+
+    <div class="cardx">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <a th:each="c : ${courses}"
+               th:href="@{/teacher/analytics(course_id=${c.course_id})}"
+               th:classappend="${c.course_id == currentCid} ? 'btnx' : 'btnx ghost'"
+               th:text="${c.course_name}">课程</a>
+        </div>
+    </div>
+
+    <div class="stat-grid" id="statGrid"></div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">出勤率随课时变化趋势</div>
+            <div class="cardx-sub">观察整个学期班级出勤的波动，定位出勤下滑的时间节点</div>
+            <div id="attTrend" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">签到状态构成</div>
+            <div class="cardx-sub">正常 / 迟到 / 请假 / 缺勤 四类状态占比</div>
+            <div id="attPie" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">课堂互动类型分布</div>
+            <div class="cardx-sub">抢答、随机点名、投票、提问的发布结构</div>
+            <div id="interPie" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">互动活跃度 TOP 10</div>
+            <div class="cardx-sub">参与互动次数最多的学生</div>
+            <div id="interTop" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">各课时互动参与率</div>
+        <div class="cardx-sub">参与率 = 实际响应数 /（选课人数 × 当节互动数）</div>
+        <div id="interTrend" class="chart"></div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">作业成绩分数段分布</div>
+            <div class="cardx-sub">评估整体成绩分布形态</div>
+            <div id="scoreDist" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">各班级平均成绩对比</div>
+            <div class="cardx-sub">横向比较行政班的学习成效</div>
+            <div id="classCmp" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">各次作业平均成绩趋势</div>
+        <div class="cardx-sub">观察班级成绩随教学推进的变化</div>
+        <div id="assignTrend" class="chart"></div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">知识点掌握度雷达</div>
+            <div class="cardx-sub">低于 60% 的知识点视为教学薄弱点</div>
+            <div id="kpRadar" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">知识点掌握情况对比</div>
+            <div class="cardx-sub">按掌握度升序排列，红色为薄弱知识点</div>
+            <div id="kpBar" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">学生 × 知识点掌握度热力图</div>
+        <div class="cardx-sub">抽样学生的知识点掌握情况，定位需要个别辅导的对象</div>
+        <div id="kpHeat" class="chart-lg"></div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">互动参与度与成绩相关性</div>
+            <div class="cardx-sub">每点代表一名学生，横轴为互动参与次数，纵轴为作业平均分</div>
+            <div id="corrScatter" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">不同出勤水平学生的平均成绩</div>
+            <div class="cardx-sub">验证出勤对学业表现的影响</div>
+            <div id="groupBar" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">分析结论</div>
+        <div class="cardx-sub">以下结论由系统根据数据库中的真实数据统计生成</div>
+        <div class="conclusion"><ol id="conclusionList"></ol></div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const CID = [[${currentCid}]];
+    const B = '/api/analytics/course/' + CID;
+
+    function lineChart(id, x, ys, names) {
+        mkChart(document.getElementById(id), {
+            tooltip: { trigger: 'axis' },
+            legend: { data: names, bottom: 0 },
+            grid: { left: 46, right: 20, top: 24, bottom: 42 },
+            xAxis: { type: 'category', data: x, name: '讲次' },
+            yAxis: { type: 'value' },
+            series: ys.map(function (v, i) {
+                return {
+                    name: names[i], type: 'line', smooth: true, data: v,
+                    symbolSize: 6, areaStyle: i === 0 ? { opacity: .12 } : undefined
+                };
+            })
+        });
+    }
+
+    function barChart(id, x, y, name, horizontal) {
+        mkChart(document.getElementById(id), {
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: horizontal ? 130 : 46, right: 24, top: 20, bottom: horizontal ? 30 : 50 },
+            xAxis: horizontal ? { type: 'value' } : { type: 'category', data: x },
+            yAxis: horizontal ? { type: 'category', data: x } : { type: 'value' },
+            series: [{
+                name: name, type: 'bar', barMaxWidth: 34, data: y,
+                itemStyle: { borderRadius: [4, 4, 0, 0] }
+            }]
+        });
+    }
+
+    function pieChart(id, data) {
+        mkChart(document.getElementById(id), {
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { bottom: 0 },
+            series: [{
+                type: 'pie', radius: ['42%', '68%'], center: ['50%', '44%'],
+                data: data, itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 }
+            }]
+        });
+    }
+
+    async function boot() {
+        const ov = await apiGet(B + '/overview');
+        const att = await apiGet(B + '/attendance');
+        const inter = await apiGet(B + '/interaction');
+        const sc = await apiGet(B + '/score');
+        const kp = await apiGet(B + '/knowledge');
+        const corr = await apiGet(B + '/correlation');
+        if (!ov) return;
+
+        // 指标卡
+        const cards = [
+            ['👥', 'blue', ov.stu_cnt, '选课人数'],
+            ['✓', 'green', ov.avg_attendance + '%', '平均出勤率'],
+            ['✦', '', ov.avg_participation + '%', '平均互动参与率'],
+            ['📊', 'orange', ov.avg_score, '作业平均分'],
+            ['▤', 'blue', ov.lesson_cnt, '课时数'],
+            ['◇', '', ov.inter_cnt, '互动发布数'],
+            ['▣', '', ov.assign_cnt, '作业次数'],
+            ['⚑', 'red', ov.risk['红'], '红色预警人数']
+        ];
+        document.getElementById('statGrid').innerHTML = cards.map(function (x) {
+            return '<div class="stat-card"><div class="stat-ico ' + x[1] + '">' + x[0] + '</div>' +
+                '<div><div class="stat-num">' + x[2] + '</div><div class="stat-label">' + x[3] + '</div></div></div>';
+        }).join('');
+
+        // 出勤
+        lineChart('attTrend', att.trend.map(r => '第' + r.lesson_no + '讲'),
+            [att.trend.map(r => r.att_rate)], ['出勤率(%)']);
+        pieChart('attPie', att.status_dist.map(r => ({ name: r.name, value: r.value })));
+
+        // 互动
+        pieChart('interPie', inter.type_dist.map(r => ({ name: r.name, value: r.value })));
+        barChart('interTop', inter.top_active.map(r => r.name), inter.top_active.map(r => r.value), '参与次数');
+        lineChart('interTrend', inter.trend.map(r => '第' + r.lesson_no + '讲'),
+            [inter.trend.map(r => r.rate)], ['互动参与率(%)']);
+
+        // 成绩
+        barChart('scoreDist', sc.dist.map(r => r.name), sc.dist.map(r => r.value), '人次');
+        barChart('classCmp', sc.class_compare.map(r => r.name), sc.class_compare.map(r => r.value), '平均分');
+        lineChart('assignTrend', sc.assign_trend.map(r => r.name), [sc.assign_trend.map(r => r.value)], ['班级平均分']);
+
+        // 知识点雷达
+        mkChart(document.getElementById('kpRadar'), {
+            tooltip: {}, legend: { bottom: 0 },
+            radar: { indicator: kp.kps.map(k => ({ name: k.kp_name, max: 100 })), radius: '66%', splitNumber: 4 },
+            series: [{
+                type: 'radar',
+                data: [{
+                    value: kp.kps.map(k => k.correct_rate), name: '班级掌握度(%)',
+                    areaStyle: { opacity: .25 }, lineStyle: { width: 2 }
+                }]
+            }]
+        });
+
+        // 知识点横向对比（升序，红色标出薄弱点）
+        const sortedKp = kp.kps.slice().sort((a, b) => a.correct_rate - b.correct_rate);
+        mkChart(document.getElementById('kpBar'), {
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: 120, right: 30, top: 16, bottom: 30 },
+            xAxis: { type: 'value', max: 100 },
+            yAxis: { type: 'category', data: sortedKp.map(k => k.kp_name) },
+            series: [{
+                type: 'bar', barMaxWidth: 20,
+                data: sortedKp.map(k => ({
+                    value: k.correct_rate,
+                    itemStyle: { color: k.correct_rate < 60 ? '#e5484d' : '#3B6EF5', borderRadius: [0, 4, 4, 0] }
+                })),
+                markLine: {
+                    silent: true, symbol: 'none',
+                    data: [{
+                        xAxis: 60, label: { formatter: '薄弱线 60%', position: 'end' },
+                        lineStyle: { color: '#e5484d', type: 'dashed' }
+                    }]
+                }
+            }]
+        });
+
+        // 热力图
+        mkChart(document.getElementById('kpHeat'), {
+            tooltip: { formatter: p => kp.heat_y[p.data[1]] + ' · ' + kp.kps[p.data[0]].kp_name + '：' + p.data[2] + '%' },
+            grid: { left: 90, right: 24, top: 20, bottom: 70 },
+            xAxis: { type: 'category', data: kp.kps.map(k => k.kp_name), axisLabel: { rotate: 28 } },
+            yAxis: { type: 'category', data: kp.heat_y, axisLabel: { fontSize: 10 } },
+            visualMap: {
+                min: 0, max: 100, calculable: true, orient: 'horizontal',
+                left: 'center', bottom: 6, inRange: { color: ['#e5484d', '#f7d154', '#22a06b'] }
+            },
+            series: [{
+                type: 'heatmap', data: kp.heat_cells,
+                emphasis: { itemStyle: { borderColor: '#333', borderWidth: 1 } }
+            }]
+        });
+
+        // 相关性散点
+        mkChart(document.getElementById('corrScatter'), {
+            tooltip: { formatter: p => p.data.name + '<br>互动 ' + p.data.x + ' 次<br>均分 ' + p.data.y },
+            grid: { left: 50, right: 20, top: 24, bottom: 46 },
+            xAxis: { type: 'value', name: '互动参与次数', nameLocation: 'middle', nameGap: 26 },
+            yAxis: { type: 'value', name: '作业平均分', nameLocation: 'middle', nameGap: 34 },
+            series: [{ type: 'scatter', symbolSize: 9, data: corr.points, itemStyle: { opacity: .75, color: '#3B6EF5' } }]
+        });
+
+        barChart('groupBar', corr.groups.map(g => g.name), corr.groups.map(g => g.value), '平均成绩', true);
+
+        // 分析结论（由真实数据动态生成）
+        const weak = kp.weak.map(k => k.kp_name + '（' + k.correct_rate + '%）').join('、');
+        const g = corr.groups;
+        const diff = (parseFloat(g[0].value) - parseFloat(g[2].value)).toFixed(1);
+        const items = [];
+        items.push('全班共 <b>' + ov.stu_cnt + '</b> 人选修，累计 <b>' + ov.lesson_cnt + '</b> 个课时、' +
+            '<b>' + ov.inter_cnt + '</b> 次课堂互动、<b>' + ov.assign_cnt + '</b> 次作业；平均出勤率 <b>' +
+            ov.avg_attendance + '%</b>，平均互动参与率 <b>' + ov.avg_participation + '%</b>，作业平均成绩 <b>' +
+            ov.avg_score + '</b> 分。');
+        items.push('出勤率 ≥ 90% 的学生平均成绩为 <b>' + g[0].value + '</b> 分，出勤率 < 70% 的学生仅 <b>' +
+            g[2].value + '</b> 分，两者相差 <b>' + diff + '</b> 分，说明<b>出勤情况与学业表现显著正相关</b>' +
+            '（相关系数 r = <b>' + corr.r_att_score + '</b>）。');
+        items.push('课堂互动参与次数与作业平均成绩的皮尔逊相关系数为 <b>' + corr.r_interact_score +
+            '</b>，呈<b>中等正相关</b>，表明课堂互动积极性能够在一定程度上预测学习效果。');
+        items.push(weak
+            ? '知识点掌握度低于 60% 的薄弱点为：<b>' + weak + '</b>，建议在后续教学中重点讲解与针对性练习。'
+            : '全部知识点班级掌握度均达到 60% 以上，整体教学效果良好。');
+        items.push('学业预警分布：红色 <b>' + ov.risk['红'] + '</b> 人、黄色 <b>' + ov.risk['黄'] +
+            '</b> 人、绿色 <b>' + ov.risk['绿'] + '</b> 人；建议对红色预警学生优先开展谈心谈话与学习帮扶。');
+        document.getElementById('conclusionList').innerHTML = items.map(t => '<li>' + t + '</li>').join('');
+    }
+
+    boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>我的课堂 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='courses')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">我的课堂</h1>
+        <p class="page-sub">
+            <span th:text="${course.course_name}">课程</span> · 完成签到、参与互动与随堂答题
+        </p>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">切换课时</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <select class="inputx" id="lessonSel" onchange="switchLesson()" style="min-width:300px"></select>
+            <span id="statusTag"></span>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">课堂签到</div>
+            <div class="cardx-sub">输入教师在课堂上公布的 4 位签到码</div>
+            <div id="checkinBox">
+                <div class="formx">
+                    <div class="field">
+                        <label>签到码</label>
+                        <input class="inputx" id="codeInput" maxlength="4" placeholder="如 8321">
+                    </div>
+                    <button class="btnx" onclick="checkin()">签到</button>
+                </div>
+            </div>
+            <div id="myAtt" style="margin-top:14px"></div>
+        </div>
+
+        <div class="cardx">
+            <div class="cardx-title">随堂答题</div>
+            <div class="cardx-sub">系统随机抽取 5 道题，提交后可查看正确率</div>
+            <button class="btnx" onclick="loadQuestions()">抽题开始</button>
+            <div id="quizBox" style="margin-top:14px"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">课堂互动</div>
+        <div class="cardx-sub">参与教师发布的抢答、投票与提问</div>
+        <div id="interBox"></div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const LESSON_ID = [[${lesson.lesson_id}]];
+    const COURSE_ID = [[${lesson.course_id}]];
+    const UID = [[${currentUser.userId}]];
+    let quiz = [];
+
+    async function loadLessons() {
+        const rows = await apiGet('/api/lessons?course_id=' + COURSE_ID);
+        if (!rows) return;
+        document.getElementById('lessonSel').innerHTML = rows.map(r =>
+            '<option value="' + r.lesson_id + '"' + (r.lesson_id === LESSON_ID ? ' selected' : '') +
+            '>第' + r.lesson_no + '讲 ' + r.title + '（' + r.lesson_date + '）</option>').join('');
+    }
+
+    function switchLesson() {
+        location.href = '/student/lesson/' + document.getElementById('lessonSel').value;
+    }
+
+    async function loadAttendance() {
+        const d = await apiGet('/api/lessons/' + LESSON_ID + '/attendance');
+        if (!d) return;
+        const cls = d.lesson.status === '进行中' ? 'tag-green' : (d.lesson.status === '已结束' ? 'tag-gray' : 'tag-blue');
+        document.getElementById('statusTag').innerHTML = '<span class="tag ' + cls + '">' + d.lesson.status + '</span>';
+
+        const mine = d.rows.find(r => r.user_id === UID);
+        document.getElementById('myAtt').innerHTML = mine
+            ? '我的签到状态：<span class="tag ' +
+              (mine.status === '正常' ? 'tag-green' : (mine.status === '未签到' ? 'tag-red' : 'tag-orange')) +
+              '">' + mine.status + '</span> ' + (mine.check_in_time || '')
+            : '';
+
+        if (mine && mine.status !== '未签到') {
+            document.getElementById('checkinBox').innerHTML =
+                '<div class="empty" style="padding:20px"><span class="empty-ico">✓</span>本节课堂已完成签到</div>';
+        }
+    }
+
+    async function checkin() {
+        const code = document.getElementById('codeInput').value.trim();
+        if (!code) { toast('请输入签到码', 'err'); return; }
+        const d = await apiPost('/api/attendances', { lesson_id: LESSON_ID, code: code });
+        if (d) { toast('签到成功'); loadAttendance(); }
+    }
+
+    async function loadInteractions() {
+        const rows = await apiGet('/api/lessons/' + LESSON_ID + '/interactions');
+        if (!rows) return;
+        if (!rows.length) {
+            document.getElementById('interBox').innerHTML = '<div class="empty"><span class="empty-ico">✦</span>本节尚无互动</div>';
+            return;
+        }
+        let html = '';
+        rows.forEach(function (r) {
+            html += '<div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px">' +
+                '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+                '<span class="tag tag-blue">' + r.type + '</span><b>' + r.title + '</b>' +
+                '<span style="color:var(--text-sub);font-size:12px">参与 ' + r.respond_cnt + '/' + r.total_stu +
+                '（' + r.respond_rate + '%）</span></div>';
+            if (r.mine) {
+                html += '<div style="margin-top:10px">已参与：我的答案 <b>' + (r.mine.answer || '-') + '</b> ' +
+                    (r.gradeable == 1 ? (r.mine.is_correct == 1
+                        ? '<span class="tag tag-green">正确 +' + r.mine.score + '</span>'
+                        : '<span class="tag tag-red">错误</span>') : '') + '</div>';
+            } else if (r.options_json) {
+                html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+                    r.options_json.split('|').map(function (o) {
+                        const letter = o.split('.')[0];
+                        return '<button class="btnx ghost sm" onclick="respond(' + r.inter_id + ',\'' + letter + '\')">' + o + '</button>';
+                    }).join('') + '</div>';
+            } else {
+                html += '<div style="margin-top:10px"><input class="inputx" id="txt' + r.inter_id +
+                    '" placeholder="请输入你的看法" style="min-width:260px">' +
+                    '<button class="btnx sm" onclick="respondText(' + r.inter_id + ')">提交</button></div>';
+            }
+            html += '</div>';
+        });
+        document.getElementById('interBox').innerHTML = html;
+    }
+
+    async function respond(id, letter) {
+        const d = await apiPost('/api/interactions/' + id + '/respond', { answer: letter });
+        if (d) { toast(d.is_correct == 1 ? '回答正确，+' + d.score + ' 分' : '已提交'); loadInteractions(); }
+    }
+
+    async function respondText(id) {
+        const v = document.getElementById('txt' + id).value.trim();
+        if (!v) { toast('请输入内容', 'err'); return; }
+        const d = await apiPost('/api/interactions/' + id + '/respond', { answer: v });
+        if (d) { toast('提交成功'); loadInteractions(); }
+    }
+
+    async function loadQuestions() {
+        const rows = await apiGet('/api/lessons/' + LESSON_ID + '/questions');
+        if (!rows) return;
+        quiz = rows;
+        document.getElementById('quizBox').innerHTML = rows.map(function (q, i) {
+            return '<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">' +
+                '<div style="font-weight:600;margin-bottom:8px">' + (i + 1) + '. ' + q.content +
+                '<span class="tag tag-gray" style="margin-left:6px">' + q.kp_name + '</span></div>' +
+                (q.options_json || '').split('|').map(function (o) {
+                    return '<label style="display:inline-block;margin-right:14px;cursor:pointer">' +
+                        '<input type="radio" name="q' + q.q_id + '" value="' + o.split('.')[0] + '"> ' + o + '</label>';
+                }).join('') + '</div>';
+        }).join('') + '<button class="btnx" onclick="submitQuiz()">提交答案</button>' +
+            '<span id="quizResult" style="margin-left:12px"></span>';
+    }
+
+    async function submitQuiz() {
+        const answers = quiz.map(function (q) {
+            const el = document.querySelector('input[name=q' + q.q_id + ']:checked');
+            return { q_id: q.q_id, answer: el ? el.value : '' };
+        });
+        const d = await apiPost('/api/answers', { lesson_id: LESSON_ID, answers: answers });
+        if (d) document.getElementById('quizResult').innerHTML =
+            '<span class="tag ' + (d.correct >= 3 ? 'tag-green' : 'tag-orange') + '">答对 ' + d.correct + '/' + d.total + '</span>';
+    }
+
+    loadLessons(); loadAttendance(); loadInteractions();
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>系统配置 | 智课堂管理后台</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='config')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">系统配置与参数管理</h1>
+        <p class="page-sub">
+            共 <b th:text="${cfg.total}">0</b> 项参数，按分组维护；配置项真正参与业务计算，修改后立即生效并留下审计记录
+        </p>
+    </div>
+
+    <div class="cardx" th:each="g : ${cfg.groups}">
+        <div class="cardx-title" th:text="${g.key}">分组</div>
+        <div class="cardx-sub">灰色「只读」项由部署环境决定，需修改配置文件并重启服务</div>
+        <div class="table-scroll">
+            <table class="tablex">
+                <thead>
+                <tr>
+                    <th style="min-width:150px">参数名称</th>
+                    <th style="min-width:180px">配置键</th>
+                    <th style="min-width:120px">当前值</th>
+                    <th style="min-width:280px;white-space:normal">说明与取值范围</th>
+                    <th style="min-width:120px">最后修改</th>
+                    <th style="min-width:140px">操作</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="c : ${g.value}">
+                    <td>
+                        <b th:text="${c.name}">名称</b>
+                        <span th:if="${c.editable == 0}" class="tag tag-gray" style="margin-left:6px">只读</span>
+                    </td>
+                    <td class="muted" th:text="${c.config_key}">key</td>
+                    <td>
+                        <span class="tag" th:classappend="${c.config_type == 'bool'} ? 'tag-blue' : 'tag-green'"
+                              th:text="${c.config_value}">值</span>
+                    </td>
+                    <td style="white-space:normal" th:text="${c.description}">说明</td>
+                    <td class="muted">
+                        <span th:text="${c.updated_by} ?: '-'">-</span><br>
+                        <span th:text="${c.updated_at} ?: ''"></span>
+                    </td>
+                    <td>
+                        <div class="op-group">
+                            <button class="btnx ghost sm" th:if="${c.editable == 1}"
+                                    th:attr="onclick=|openEdit('${c.config_key}','${c.config_type}','${c.name}','${c.description}')|">
+                                编辑
+                            </button>
+                            <button class="btnx ghost sm" th:if="${c.editable == 1}"
+                                    th:attr="onclick=|doReset('${c.config_key}',this)|">恢复默认
+                            </button>
+                            <span th:if="${c.editable == 0}" class="muted">重启后生效</span>
+                        </div>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</main>
+
+<div class="modalx" id="modal" onclick="if(event.target===this)closeModal()">
+    <div class="modalx-body" style="width:520px">
+        <div class="modalx-head">
+            <span id="mTitle" style="font-weight:700;font-size:16px"></span>
+            <button class="btnx ghost sm" onclick="closeModal()">关闭</button>
+        </div>
+        <div id="mBody" style="padding:16px 0"></div>
+        <div id="mFoot" style="display:flex;gap:10px;justify-content:flex-end"></div>
+    </div>
+</div>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script>
+    let curKey = '';
+
+    function openEdit(key, type, name, desc) {
+        curKey = key;
+        let input;
+        if (type === 'bool') {
+            input = `<select class="inputx" id="c_value" style="width:100%">
+                        <option value="true">true（启用）</option>
+                        <option value="false">false（关闭）</option>
+                     </select>`;
+        } else if (type === 'int' || type === 'decimal') {
+            input = `<input class="inputx" id="c_value" type="number" step="${type === 'decimal' ? '0.01' : '1'}" style="width:100%">`;
+        } else {
+            input = `<input class="inputx" id="c_value" style="width:100%">`;
+        }
+        document.getElementById('mTitle').textContent = '修改配置 · ' + name;
+        document.getElementById('mBody').innerHTML =
+            `<div class="field"><label>配置键</label><input class="inputx" value="${key}" disabled style="width:100%"></div>
+             <div class="field" style="margin-top:12px;width:100%"><label>配置值（${type}）</label>${input}</div>
+             <p class="hint">${desc || ''}</p>`;
+        document.getElementById('mFoot').innerHTML =
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + '<button class="btnx" onclick="submitEdit()">保存</button>';
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    async function submitEdit() {
+        const v = document.getElementById('c_value').value.trim();
+        if (!v) return toast('配置值不能为空', 'err');
+        const res = await fetch('/api/admin/config', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ config_key: curKey, config_value: v })
+        });
+        const j = await res.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('已保存：' + j.data);
+        closeModal();
+        setTimeout(() => location.reload(), 600);
+    }
+
+    async function doReset(key) {
+        if (!confirm('确认将该配置项恢复为系统默认值？')) return;
+        const res = await fetch('/api/admin/config/' + encodeURIComponent(key) + '/reset', { method: 'POST' });
+        const j = await res.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('已恢复默认：' + j.data);
+        setTimeout(() => location.reload(), 600);
+    }
+
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+</script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>系统监控 | 智课堂管理后台</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='monitor')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">系统监控</h1>
+        <p class="page-sub">业务规模、数据库与运行环境状态一览 · 数据时间：<span th:text="${overview.time}"></span></p>
+        <label class="refresh-switch">
+            <input type="checkbox" id="autoRefresh" onchange="toggleAuto()"> 每 30 秒自动刷新
+        </label>
+    </div>
+
+    <!-- 业务规模 -->
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-ico">👥</div>
+            <div><div class="stat-num" th:text="${overview.biz.user_cnt} ?: 0">0</div>
+                <div class="stat-label">账号总数</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico green">🎓</div>
+            <div><div class="stat-num" th:text="${overview.biz.student_cnt} ?: 0">0</div>
+                <div class="stat-label">学生</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico blue">🧑‍🏫</div>
+            <div><div class="stat-num" th:text="${overview.biz.teacher_cnt} ?: 0">0</div>
+                <div class="stat-label">教师</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico orange">🔒</div>
+            <div><div class="stat-num" th:text="${overview.biz.disabled_cnt} ?: 0">0</div>
+                <div class="stat-label">停用账号</div></div>
+        </div>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-ico">📘</div>
+            <div><div class="stat-num" th:text="${overview.biz.course_cnt} ?: 0">0</div>
+                <div class="stat-label">课程</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico blue">🗓️</div>
+            <div><div class="stat-num" th:text="${overview.biz.lesson_cnt} ?: 0">0</div>
+                <div class="stat-label">课时</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico green">✅</div>
+            <div><div class="stat-num" th:text="${overview.biz.att_cnt} ?: 0">0</div>
+                <div class="stat-label">签到记录</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico orange">📝</div>
+            <div><div class="stat-num" th:text="${overview.biz.sub_cnt} ?: 0">0</div>
+                <div class="stat-label">作业提交</div></div>
+        </div>
+    </div>
+
+    <!-- 健康检查 -->
+    <div class="cardx">
+        <div class="cardx-title">运行状态自检</div>
+        <div class="cardx-sub">把分散指标翻译成"是否正常"的结论，异常项以红色标出</div>
+        <div class="health-grid">
+            <div class="health-item" th:each="h : ${overview.health}"
+                 th:classappend="${h.level == 'err'} ? 'is-err' : (${h.level == 'warn'} ? 'is-warn' : 'is-ok')">
+                <div class="health-name">
+                    <span th:text="${h.name}">项目</span>
+                    <span class="tag" th:classappend="${h.level == 'err'} ? 'tag-red' : (${h.level == 'warn'} ? 'tag-orange' : 'tag-green')"
+                          th:text="${h.status}">正常</span>
+                </div>
+                <div class="health-desc" th:text="${h.desc}">说明</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">近 7 日学习活跃趋势</div>
+            <div class="cardx-sub">按天统计学习行为次数与活跃学生数</div>
+            <div id="trendChart" class="chart"></div>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">各表数据量 TOP 10</div>
+            <div class="cardx-sub">来自 information_schema 统计（InnoDB 为估算值）</div>
+            <div id="tableChart" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">数据库</div>
+            <table class="tablex">
+                <tr><th style="width:40%">版本</th><td th:text="${overview.db.version} ?: '-'">-</td></tr>
+                <tr><th>当前连接 / 上限</th>
+                    <td><span th:text="${overview.db.conn_now} ?: 0">0</span> / <span th:text="${overview.db.max_conn} ?: 0">0</span></td></tr>
+                <tr><th>已运行时长</th><td th:text="${overview.db.uptime_text} ?: '-'">-</td></tr>
+                <tr><th>库容量</th><td><span th:text="${overview.dbSize.size_mb} ?: 0">0</span> MB</td></tr>
+            </table>
+        </div>
+        <div class="cardx">
+            <div class="cardx-title">运行环境</div>
+            <table class="tablex">
+                <tr><th style="width:40%">JVM 堆内存</th>
+                    <td><span th:text="${overview.jvm.heap_used_mb}">0</span> MB /
+                        <span th:text="${overview.jvm.heap_max_mb}">0</span> MB（<span th:text="${overview.jvm.heap_pct}">0</span>%）</td></tr>
+                <tr><th>线程数 / CPU 核数</th>
+                    <td><span th:text="${overview.jvm.threads}">0</span> / <span th:text="${overview.jvm.processors}">0</span></td></tr>
+                <tr><th>应用运行时间</th><td th:text="${overview.jvm.uptime_text} ?: '-'">-</td></tr>
+                <tr><th>备份目录可用空间</th>
+                    <td><span th:text="${overview.disk.free_gb}">0</span> GB（已用 <span th:text="${overview.disk.used_pct}">0</span>%）</td></tr>
+            </table>
+        </div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const TREND = [[${overview.trend}]] || [];
+    const TABLES = [[${overview.tables}]] || [];
+    let timer = null;
+
+    mkChart(document.getElementById('trendChart'), {
+        tooltip: { trigger: 'axis' },
+        legend: { bottom: 0 },
+        grid: { left: 46, right: 18, top: 26, bottom: 42 },
+        xAxis: { type: 'category', data: TREND.map(t => String(t.d)) },
+        yAxis: [{ type: 'value', name: '行为数' }, { type: 'value', name: '活跃学生' }],
+        series: [
+            { name: '学习行为数', type: 'line', smooth: true, areaStyle: { opacity: .18 }, data: TREND.map(t => t.c) },
+            { name: '活跃学生数', type: 'bar', yAxisIndex: 1, barWidth: 18, data: TREND.map(t => t.stu) }
+        ]
+    });
+
+    const top = TABLES.slice(0, 10).reverse();
+    mkChart(document.getElementById('tableChart'), {
+        tooltip: { trigger: 'axis' },
+        grid: { left: 130, right: 30, top: 16, bottom: 24 },
+        xAxis: { type: 'value' },
+        yAxis: { type: 'category', data: top.map(t => t.table_name) },
+        series: [{
+            type: 'bar', barWidth: 14,
+            itemStyle: { borderRadius: [0, 6, 6, 0] },
+            label: { show: true, position: 'right', fontSize: 11 },
+            data: top.map(t => t.table_rows || 0)
+        }]
+    });
+
+    function toggleAuto() {
+        const on = document.getElementById('autoRefresh').checked;
+        clearInterval(timer);
+        if (on) timer = setInterval(() => location.reload(), 30000);
+        toast(on ? '已开启 30 秒自动刷新' : '已关闭自动刷新');
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Render Blueprint：推送到 GitHub 后，在 Render 新建 Blueprint 并选择本仓库即可
+# Dashboard → New → Blueprint → 连接仓库 → 渲染出的服务里填入数据库环境变量
+services:
+  - type: web
+    name: classroom-insight
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore          # 新加坡，国内访问较快
+    branch: main
+    healthCheckPath: /login
+    numInstances: 1
+    envVars:
+      # 常量不要写在这里，由 Render 自动注入（Docker runtime 默认 PORT=10000）
+      - key: JAVA_OPTS
+        value: "-Xms128m -Xmx384m"
+      - key: TZ
+        value: Asia/Shanghai
+      - key: DB_URL
+        sync: false            # 部署后在 Environment 面板填写
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false

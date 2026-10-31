@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>课堂实时看板 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='lessons')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">课堂实时看板</h1>
+        <p class="page-sub">
+            <span th:text="${course.course_name}">课程</span> ·
+            <span th:text="${lesson.title}">课时</span> ·
+            <span th:text="${lesson.lesson_date}">日期</span>
+        </p>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx">
+            <div class="cardx-title">课堂签到</div>
+            <div class="cardx-sub">
+                课堂状态：<span id="statusTag" class="tag tag-gray" th:text="${lesson.status}">状态</span>
+                <span style="margin-left:10px;color:var(--text-sub)">数据每 3 秒自动刷新</span>
+            </div>
+
+            <div class="code-box" id="codeBox" th:text="${lesson.checkin_code} ?: '——'">——</div>
+            <div style="text-align:center;color:var(--text-sub);font-size:12px;margin-bottom:14px">
+                学生端输入以上 4 位签到码完成签到
+            </div>
+
+            <div style="display:flex;gap:10px;justify-content:center;margin-bottom:16px">
+                <button class="btnx" th:if="${lesson.status != '进行中'}" onclick="startLesson()">开始课堂并生成签到码</button>
+                <button class="btnx danger" th:if="${lesson.status == '进行中'}" onclick="endLesson()">结束课堂</button>
+                <a class="btnx ghost" th:href="@{/teacher/lessons(course_id=${lesson.course_id})}">返回课堂管理</a>
+            </div>
+
+            <div id="ringChart" class="chart" style="height:240px"></div>
+        </div>
+
+        <div class="cardx">
+            <div class="cardx-title">出勤明细</div>
+            <div class="cardx-sub">实时签到名单（正常 / 迟到 / 请假 / 未签到）</div>
+            <div id="attStat" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px"></div>
+            <div id="attTable"></div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">本节课堂互动实时统计</div>
+        <div class="cardx-sub">互动发布后，学生响应情况与正确率实时更新</div>
+        <div id="interTable"></div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script th:inline="javascript">
+    const LESSON_ID = [[${lesson.lesson_id}]];
+    let ringChart = null;
+
+    async function refresh() {
+        const d = await apiGet('/api/lessons/' + LESSON_ID + '/live');
+        if (!d) return;
+
+        document.getElementById('codeBox').textContent = d.lesson.checkin_code || '——';
+        const st = d.lesson.status;
+        const cls = st === '进行中' ? 'tag-green' : (st === '已结束' ? 'tag-gray' : 'tag-blue');
+        document.getElementById('statusTag').className = 'tag ' + cls;
+        document.getElementById('statusTag').textContent = st;
+
+        const a = d.attendance;
+        if (!ringChart) ringChart = mkChart(document.getElementById('ringChart'), {});
+        ringChart.setOption({
+            tooltip: { trigger: 'item' },
+            legend: { bottom: 0 },
+            series: [{
+                type: 'pie', radius: ['58%', '78%'], center: ['50%', '46%'],
+                avoidLabelOverlap: false,
+                label: { show: true, position: 'center', formatter: '{b}\n{c} 人', fontSize: 13 },
+                emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold' } },
+                labelLine: { show: false },
+                data: [
+                    { value: a.stat['正常'] || 0, name: '正常', itemStyle: { color: '#22a06b' } },
+                    { value: a.stat['迟到'] || 0, name: '迟到', itemStyle: { color: '#e5a23c' } },
+                    { value: a.stat['请假'] || 0, name: '请假', itemStyle: { color: '#3aa0d8' } },
+                    { value: a.stat['未签到'] || 0, name: '未签到', itemStyle: { color: '#dfe4ec' } }
+                ]
+            }],
+            title: {
+                text: a.rate + '%', subtext: '出勤率',
+                left: 'center', top: '38%',
+                textStyle: { fontSize: 26, color: '#3B6EF5' },
+                subtextStyle: { fontSize: 12 }
+            }
+        });
+
+        document.getElementById('attStat').innerHTML =
+            '<span class="tag tag-green">正常 ' + (a.stat['正常'] || 0) + '</span>' +
+            '<span class="tag tag-orange">迟到 ' + (a.stat['迟到'] || 0) + '</span>' +
+            '<span class="tag tag-blue">请假 ' + (a.stat['请假'] || 0) + '</span>' +
+            '<span class="tag tag-gray">未签到 ' + (a.stat['未签到'] || 0) + '</span>' +
+            '<span class="tag tag-red">缺勤 ' + (a.stat['缺勤'] || 0) + '</span>';
+
+        renderTable(document.getElementById('attTable'), [
+            { title: '学号', key: 'username' },
+            { title: '姓名', key: 'real_name' },
+            { title: '班级', key: 'class_name' },
+            {
+                title: '状态', fmt: function (r) {
+                    const m = { '正常': 'tag-green', '迟到': 'tag-orange', '请假': 'tag-blue' };
+                    return '<span class="tag ' + (m[r.status] || 'tag-red') + '">' + r.status + '</span>';
+                }
+            },
+            { title: '签到时间', key: 'check_in_time' }
+        ], a.rows, '暂无选课学生');
+
+        renderTable(document.getElementById('interTable'), [
+            { title: '类型', key: 'type' },
+            { title: '内容', key: 'title' },
+            { title: '参与率', fmt: r => r.respond_cnt + '/' + r.total_stu + '（' + r.respond_rate + '%）' },
+            { title: '正确率', fmt: r => r.gradeable == 1 ? r.correct_rate + '%' : '<span class="tag tag-gray">不计分</span>' }
+        ], d.interactions, '本节尚未发布互动');
+    }
+
+    async function startLesson() {
+        const d = await apiPost('/api/lessons/' + LESSON_ID + '/start');
+        if (d) { toast('课堂已开始，签到码 ' + d.checkin_code); setTimeout(() => location.reload(), 600); }
+    }
+    async function endLesson() {
+        const d = await apiPost('/api/lessons/' + LESSON_ID + '/end');
+        if (d) { toast(d.msg); setTimeout(() => location.reload(), 600); }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+</script>
+</body>
+</html>

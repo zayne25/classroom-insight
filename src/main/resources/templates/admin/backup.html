@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>数据备份与恢复 | 智课堂管理后台</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='backup')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">数据备份与恢复</h1>
+        <p class="page-sub">
+            数据库：<b th:text="${dbName}">classroom</b> ·
+            备份目录：<span class="muted" th:text="${dir}">backups</span>
+        </p>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">操作</div>
+        <div class="cardx-sub">
+            备份优先调用 mysqldump，不可用时自动降级为内置逻辑转储（表结构 + 批量 INSERT）；
+            每次<b>恢复前都会自动先备份当前库</b>，为误操作保留回退路径
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btnx" onclick="createBackup()">+ 立即备份</button>
+            <button class="btnx ghost" onclick="load()">刷新列表</button>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">备份记录</div>
+        <div class="cardx-sub">仅保留最近 100 条记录；删除记录会同时删除磁盘上的备份文件</div>
+        <div id="bkBox"></div>
+    </div>
+</main>
+
+<div class="modalx" id="modal" onclick="if(event.target===this)closeModal()">
+    <div class="modalx-body" style="width:560px">
+        <div class="modalx-head">
+            <span id="mTitle" style="font-weight:700;font-size:16px"></span>
+            <button class="btnx ghost sm" onclick="closeModal()">关闭</button>
+        </div>
+        <div id="mBody" style="padding:14px 0"></div>
+        <div id="mFoot" style="display:flex;gap:10px;justify-content:flex-end"></div>
+    </div>
+</div>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script>
+    let rows = [];
+
+    async function load() {
+        const d = await apiGet('/api/admin/backup/list');
+        if (!d) return;
+        rows = d;
+        renderTable(document.getElementById('bkBox'), [
+            { title: '文件名', fmt: r => '<b>' + r.file_name + '</b>' + (r.file_exists ? '' : ' <span class="tag tag-red">文件缺失</span>') },
+            { title: '类型', fmt: r => '<span class="tag ' + (r.backup_type === '手动' ? 'tag-blue' : 'tag-orange') + '">' + r.backup_type + '</span>' },
+            { title: '大小', fmt: r => r.size_text },
+            { title: '表 / 行数', fmt: r => (r.table_cnt || 0) + ' 表 / ' + (r.row_cnt || 0) + ' 行' },
+            { title: '状态', fmt: r => r.status === '成功' ? '<span class="tag tag-green">成功</span>' : '<span class="tag tag-red">失败</span>' },
+            { title: '耗时', fmt: r => (r.cost_ms == null ? '-' : (r.cost_ms / 1000).toFixed(1) + ' s') },
+            { title: '操作人', fmt: r => r.operator_name || '-' },
+            { title: '时间', fmt: r => '<span class="muted">' + (r.created_at || '-') + '</span>' },
+            {
+                title: '操作', fmt: (r, i) =>
+                    '<div class="op-group">'
+                    + '<button class="btnx ghost sm" onclick="download(' + r.backup_id + ')">下载</button>'
+                    + (r.status === '成功' && r.file_exists ? '<button class="btnx sm" onclick="openRestore(' + i + ')">恢复</button>' : '')
+                    + '<button class="btnx sm danger" onclick="doDelete(' + r.backup_id + ')">删除</button>'
+                    + '</div>'
+            }
+        ], d, '还没有备份记录，点击上方「立即备份」创建第一份备份');
+    }
+
+    async function createBackup() {
+        toast('备份中，请稍候…');
+        const d = await apiPost('/api/admin/backup/create');
+        if (!d) return;
+        toast('备份完成：' + d.file_name + '（' + d.size_text + '）');
+        load();
+    }
+
+    function download(id) { location.href = '/api/admin/backup/' + id + '/download'; }
+
+    function openRestore(i) {
+        const r = rows[i];
+        document.getElementById('mTitle').textContent = '恢复数据 · ' + r.file_name;
+        document.getElementById('mBody').innerHTML = `
+            <div class="del-warn">
+                <div><b>危险操作</b>：恢复会用备份内容<b>覆盖</b>当前数据库
+                    （${r.table_cnt || 0} 表 / ${r.row_cnt || 0} 行），当前数据将丢失。</div>
+                <div style="margin-top:8px">执行前系统会先把当前库自动备份一份，可在列表中回退。</div>
+            </div>
+            <div class="field" style="margin-top:14px">
+                <label>请输入文件名 <b>${r.file_name}</b> 以确认</label>
+                <input class="inputx" id="r_confirm" placeholder="${r.file_name}" style="width:100%">
+            </div>`;
+        document.getElementById('mFoot').innerHTML =
+            '<button class="btnx ghost" onclick="closeModal()">取消</button>'
+            + '<button class="btnx danger" onclick="submitRestore(' + r.backup_id + ')">确认恢复</button>';
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    async function submitRestore(id) {
+        const confirmText = document.getElementById('r_confirm').value.trim();
+        const res = await fetch('/api/admin/backup/' + id + '/restore', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirm: confirmText })
+        });
+        const j = await res.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('恢复完成，耗时 ' + (j.data.cost_ms / 1000).toFixed(1) + ' s');
+        closeModal();
+        load();
+    }
+
+    async function doDelete(id) {
+        if (!confirm('确认删除该备份？磁盘文件将一并删除。')) return;
+        const res = await fetch('/api/admin/backup/' + id, { method: 'DELETE' });
+        const j = await res.json();
+        if (j.code !== 0) return toast(j.msg, 'err');
+        toast('已删除');
+        load();
+    }
+
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+    load();
+</script>
+</body>
+</html>

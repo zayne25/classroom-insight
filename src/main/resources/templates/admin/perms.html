@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>权限与访问控制 | 智课堂管理后台</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='perms')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">权限与访问控制</h1>
+        <p class="page-sub">按角色配置权限点，勾选即生效；管理员角色默认拥有全部权限且不可修改</p>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">权限矩阵</div>
+        <div class="cardx-sub">
+            共 <b th:text="${matrix.total}">0</b> 个权限点。
+            权限点由系统内置（不可增删），管理员只能调整各角色的启用状态；
+            学生角色不允许开启系统管理类权限。
+        </div>
+
+        <div class="table-scroll">
+            <table class="tablex perm-table">
+                <thead>
+                <tr>
+                    <th style="min-width:210px">权限点</th>
+                    <th style="min-width:130px">分组</th>
+                    <th:block th:each="r : ${matrix.roles}">
+                        <th class="role-th">
+                            <span th:text="${r.name}">角色</span>
+                            <span th:if="${r.locked}" class="tag tag-gray" style="margin-left:4px">锁定</span>
+                        </th>
+                    </th:block>
+                </tr>
+                </thead>
+                <tbody th:each="g : ${matrix.groups}">
+                <tr class="group-row">
+                    <td colspan="5"><b th:text="${g.key}">分组</b></td>
+                </tr>
+                <tr th:each="row : ${g.value}">
+                    <td>
+                        <div th:text="${row.perm_name}">权限名称</div>
+                        <div class="muted" th:text="${row.perm_code}">code</div>
+                    </td>
+                    <td th:text="${g.key}">分组</td>
+                    <th:block th:each="r : ${matrix.roles}">
+                        <td class="perm-cell">
+                            <th:block th:if="${r.locked}">
+                                <span class="tag tag-green">✓ 始终启用</span>
+                            </th:block>
+                            <th:block th:if="${!r.locked}">
+                                <label class="switch">
+                                    <input type="checkbox"
+                                           th:checked="${row.get(r.code)}"
+                                           th:attr="onchange=|toggle('${r.code}','${row.perm_code}',this)|">
+                                    <span></span>
+                                </label>
+                            </th:block>
+                        </td>
+                    </th:block>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="cardx-title">权限模型说明</div>
+        <ul class="note-list">
+            <li><b>判定顺序</b>：登录 → 角色粗筛（页面 / 接口）→ 权限点细筛（role_permission）→ 数据归属校验（如教师只能操作本人课程）。</li>
+            <li><b>管理员自锁保护</b>：admin 角色权限恒为全部且不提供修改入口，避免误操作导致系统无人可管。</li>
+            <li><b>失效回退</b>：配置表读取异常时回退到内置默认权限，保证系统可用；配置修改后服务端缓存立即刷新。</li>
+            <li><b>落地位置</b>：教师端课堂、互动、作业、AI 批改等写操作均会校验对应权限点，被停用后实时生效。</li>
+        </ul>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script>
+    async function toggle(role, code, el) {
+        const enabled = el.checked;
+        const res = await fetch('/api/admin/perms', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, perm_code: code, enabled })
+        });
+        const j = await res.json();
+        if (j.code !== 0) {
+            el.checked = !enabled;               // 失败回滚勾选状态
+            return toast(j.msg || '保存失败', 'err');
+        }
+        toast(role + ' · ' + code + ' 已' + (enabled ? '启用' : '停用'));
+    }
+</script>
+</body>
+</html>

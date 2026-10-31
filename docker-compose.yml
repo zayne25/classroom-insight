@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: classroom-mysql
+    restart: unless-stopped
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --lower-case-table-names=1
+    environment:
+      MYSQL_ROOT_PASSWORD: '123456'
+      MYSQL_ROOT_HOST: '%'
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"          # 公网部署建议删除此行，不要把数据库暴露到外网
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p123456", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    container_name: classroom-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # 容器间用服务名 mysql 访问；这三个环境变量优先级高于 application.yml
+      DB_URL: 'jdbc:mysql://mysql:3306/classroom?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true'
+      DB_USER: root
+      DB_PASSWORD: '123456'
+      TZ: Asia/Shanghai
+      JAVA_OPTS: '-Xms256m -Xmx512m'
+    ports:
+      - "8080:8080"
+    volumes:
+      - backups:/app/backups
+
+volumes:
+  mysql-data:
+  backups:

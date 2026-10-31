@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>教学总览 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='dashboard')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">教学总览</h1>
+        <p class="page-sub">查看所授课程的课堂规模、出勤情况与学业预警概况</p>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-ico">▤</div>
+            <div><div class="stat-num" th:text="${#lists.size(courses)}">0</div><div class="stat-label">我的课程</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico blue">👥</div>
+            <div><div class="stat-num" th:text="${totalStu}">0</div><div class="stat-label">累计选课人次</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico green">✓</div>
+            <div><div class="stat-num" th:text="${avgAtt} + '%'">0%</div><div class="stat-label">平均出勤率</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-ico red">⚑</div>
+            <div><div class="stat-num" th:text="${totalRisk}">0</div><div class="stat-label">红色预警人次</div></div>
+        </div>
+    </div>
+
+    <div class="cardx" th:if="${#lists.isEmpty(courses)}">
+        <div class="empty"><span class="empty-ico">📚</span>当前账号下暂无课程</div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx" th:each="c : ${courses}">
+            <div class="cardx-title" th:text="${c.course_name}">课程名</div>
+            <div class="cardx-sub">
+                <span th:text="${c.course_code}">代码</span> ·
+                <span th:text="${c.semester}">学期</span> ·
+                <span th:text="${c.credit}">学分</span> 学分
+            </div>
+
+            <div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:16px">
+                <div><div class="stat-num" style="font-size:20px" th:text="${c.stu_cnt}">0</div><div class="stat-label">选课人数</div></div>
+                <div><div class="stat-num" style="font-size:20px" th:text="${c.lesson_cnt}">0</div><div class="stat-label">已排课时</div></div>
+                <div><div class="stat-num" style="font-size:20px" th:text="${c.avg_att} + '%'">0%</div><div class="stat-label">平均出勤率</div></div>
+                <div><div class="stat-num" style="font-size:20px" th:text="${c.avg_score}">0</div><div class="stat-label">作业平均分</div></div>
+                <div><div class="stat-num" style="font-size:20px;color:var(--danger)" th:text="${c.risk_cnt}">0</div><div class="stat-label">红色预警</div></div>
+            </div>
+
+            <div class="bar-wrap">
+                <div class="bar-inner" th:style="'width:' + ${c.avg_att} + '%'"></div>
+            </div>
+
+            <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+                <a class="btnx" th:href="@{/teacher/analytics(course_id=${c.course_id})}">学情分析</a>
+                <a class="btnx ghost" th:href="@{/teacher/lessons(course_id=${c.course_id})}">课堂管理</a>
+                <a class="btnx ghost" th:href="@{/teacher/students(course_id=${c.course_id})}">预警名单</a>
+            </div>
+        </div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+</body>
+</html>

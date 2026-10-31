@@ -1,0 +1,58 @@
+server:
+  # 云平台（Render / Railway / Fly.io）会注入 PORT，本地未设置时用 8080
+  port: ${PORT:8080}
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: classroom-insight
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 本地默认走 127.0.0.1；云部署时用环境变量 DB_URL 整条覆盖（可带 TLS 参数）
+    url: '${DB_URL:jdbc:mysql://127.0.0.1:3306/classroom?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}'
+    username: '${DB_USER:root}'
+    password: '${DB_PASSWORD:123456}'
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  thymeleaf:
+    cache: false
+    mode: HTML
+    encoding: UTF-8
+    suffix: .html
+    prefix: classpath:/templates/
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+  servlet:
+    multipart:
+      max-file-size: 10MB
+
+# ---------------- AI 批改配置 ----------------
+# provider=local 时使用内置启发式引擎（离线可用，用于流程演示）；
+# provider=http  时调用 OpenAI 兼容接口（需填 endpoint 与 api-key），失败自动降级为 local。
+ai:
+  grading:
+    provider: local
+    endpoint: ''
+    api-key: ''
+    model: local-heuristic-v1
+    http-timeout-ms: 15000
+    # 置信度低于该阈值的批改结果强制标记为需人工复核
+    confidence-threshold: 0.75
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  mapper-locations: classpath:mapper/*.xml
+
+logging:
+  level:
+    root: INFO
+    com.zhiketang: INFO
+  charset:
+    console: UTF-8

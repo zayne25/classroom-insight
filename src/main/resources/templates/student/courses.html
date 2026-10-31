@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>我的课程 | 智课堂</title>
+    <th:block th:insert="~{base :: head}"></th:block>
+</head>
+<body>
+
+<th:block th:insert="~{base :: topbar}"></th:block>
+<th:block th:insert="~{base :: sidebar(active='courses')}"></th:block>
+
+<main class="app-main">
+    <div class="page-head">
+        <h1 class="page-title">我的课程</h1>
+        <p class="page-sub">查看已选修课程的学习概况，进入课堂完成签到与互动</p>
+    </div>
+
+    <div class="cardx" th:if="${#lists.isEmpty(courses)}">
+        <div class="empty"><span class="empty-ico">📚</span>暂无选修课程</div>
+    </div>
+
+    <div class="grid-2">
+        <div class="cardx" th:each="c : ${courses}">
+            <div class="cardx-title" th:text="${c.course_name}">课程名</div>
+            <div class="cardx-sub">
+                <span th:text="${c.course_code}">代码</span> ·
+                授课教师 <span th:text="${c.teacher_name}">教师</span> ·
+                <span th:text="${c.lesson_cnt}">0</span> 课时
+            </div>
+
+            <div th:if="${c.kpi != null}" style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:14px">
+                <div><div class="stat-num" style="font-size:19px" th:text="${c.kpi.attendance_pct} + '%'">0%</div><div class="stat-label">出勤率</div></div>
+                <div><div class="stat-num" style="font-size:19px" th:text="${c.kpi.interact_cnt}">0</div><div class="stat-label">互动次数</div></div>
+                <div><div class="stat-num" style="font-size:19px" th:text="${c.kpi.avg_score}">0</div><div class="stat-label">作业均分</div></div>
+                <div><div class="stat-num" style="font-size:19px" th:text="${c.kpi.composite_score}">0</div><div class="stat-label">综合学情分</div></div>
+                <div>
+                    <div style="margin-top:4px">
+                        <span class="tag" th:classappend="${c.kpi.risk_level == '红'} ? 'tag-red' : (${c.kpi.risk_level == '黄'} ? 'tag-orange' : 'tag-green')"
+                              th:text="${c.kpi.risk_level}">绿</span>
+                    </div>
+                    <div class="stat-label">风险等级</div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+                <button class="btnx" th:onclick="'enter(' + ${c.course_id} + ')'">进入课堂</button>
+                <a class="btnx ghost" th:href="@{/student/report(course_id=${c.course_id})}">我的学情</a>
+            </div>
+        </div>
+    </div>
+</main>
+
+<th:block th:insert="~{base :: tail}"></th:block>
+
+<script>
+    async function enter(cid) {
+        const lessons = await apiGet('/api/lessons?course_id=' + cid);
+        if (!lessons || !lessons.length) { toast('该课程暂无课时', 'err'); return; }
+        const live = lessons.find(l => l.status === '进行中') || lessons[lessons.length - 1];
+        location.href = '/student/lesson/' + live.lesson_id;
+    }
+</script>
+</body>
+</html>

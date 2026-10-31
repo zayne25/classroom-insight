@@ -1,0 +1,11 @@
+target/
+runtime/
+backups/
+.git/
+.github/
+*.log
+*.bat
+docs/
+scripts/
+Dockerfile
+docker-compose.yml

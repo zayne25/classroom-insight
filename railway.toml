@@ -1,0 +1,11 @@
+# Railway：New Project → Deploy from GitHub repo（自动识别根目录 Dockerfile）
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# 首次启动会自动建演示数据，给足超时时间
+healthcheckPath = "/login"
+healthcheckTimeout = 300
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 10
