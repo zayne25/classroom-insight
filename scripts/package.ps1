@@ -15,18 +15,20 @@ param(
     [switch]$WithRuntime,
     [switch]$WithDbDump,
     [string]$DbUser = "root",
-    [string]$DbPassword = "123456"
+    [string]$DbPassword = "123456",
+    [string]$OutName = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $name = "classroom-insight-v$Version"
 $stage = Join-Path $root "dist\$name"
-$zip = Join-Path $root "dist\$name.zip"
+$zipName = if ($OutName) { $OutName } else { "$name.zip" }
+$zip = Join-Path $root "dist\$zipName"
 
 Write-Host "[1/5] clean staging dir" -ForegroundColor Cyan
-if (Test-Path (Join-Path $root "dist")) {
-    Remove-Item -Recurse -Force (Join-Path $root "dist")
+if (Test-Path $stage) {
+    Remove-Item -Recurse -Force $stage
 }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
@@ -69,6 +71,9 @@ if ($WithDbDump) {
         Write-Host "      dump failed, skip" -ForegroundColor Yellow
     }
 }
+
+Write-Host "[3/5] clear read-only flags (Compress-Archive fails on read-only files)" -ForegroundColor Cyan
+Get-ChildItem $stage -Recurse -File -Force | ForEach-Object { $_.IsReadOnly = $false }
 
 Write-Host "[3/5] write package manifest" -ForegroundColor Cyan
 $manifest = @()
