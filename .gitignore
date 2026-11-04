@@ -11,6 +11,9 @@ backups/
 *.log
 app_*.log
 
+# 交付打包产物
+dist/
+
 # 临时脚本 / 调试 SQL
 tmp_*.sql
 diag*.sql
